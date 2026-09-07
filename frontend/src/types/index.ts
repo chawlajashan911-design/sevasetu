@@ -1,6 +1,29 @@
 export type Language = 'mr' | 'hi' | 'en';
-export type PortalType = 'patient' | 'asha' | 'doctor' | 'admin';
+export type PortalType = 'patient' | 'doctor' | 'clinic' | 'hospital' | 'health_worker' | 'asha' | 'admin';
+export type UserRole = 'patient' | 'doctor' | 'clinic' | 'hospital' | 'health_worker' | 'admin';
 export type PriorityLevel = 'P1' | 'P2' | 'P3';
+
+export interface AuthUser {
+  role: UserRole;
+  name: string;
+  phone?: string;
+  facility?: string;
+  badge?: string;
+  avatar?: string;
+  village?: string;
+  taluka?: string;
+  district?: string;
+}
+
+export interface VillageRecord {
+  id: string;
+  name: string;
+  district: string;
+  taluka: string;
+  districtCode?: string;
+  talukaCode?: string;
+  status?: string;
+}
 
 export interface Vitals {
   systolic_bp?: number;
@@ -22,6 +45,8 @@ export interface Patient {
   gender: string;
   phone: string;
   village?: string;
+  taluka?: string;
+  district?: string;
   wadi?: string;
   preferred_language?: Language;
   created_at?: string;
@@ -35,6 +60,8 @@ export interface TriageRecord {
   age: number;
   gender: string;
   village: string;
+  taluka?: string;
+  district?: string;
   phone?: string;
   vitals: Vitals;
   priority: PriorityLevel;
@@ -54,16 +81,48 @@ export interface TriageRecord {
 export interface Facility {
   id: string;
   name: string;
-  type: string;
-  distance_km: number;
-  village: string;
-  phone: string;
-  doctor: string;
-  status: string;
-  coordinates: {
+  name_mr?: string;
+  name_hi?: string;
+  category?: string;
+  care_type?: string;
+  address?: string;
+  district?: string;
+  subdistrict?: string;
+  village?: string;
+  pincode?: string;
+  type?: string;
+  level?: 'Level 1' | 'Level 2' | 'Referral' | string;
+  distance_km?: number;
+  phone?: string;
+  doctor?: string;
+  doctors?: number | string;
+  beds?: number | string;
+  specialties?: string;
+  facilities?: string;
+  emergency_services?: string;
+  ambulance?: string;
+  status?: string;
+  is_demo?: boolean;
+  coordinates?: {
     lat: number;
     lng: number;
   };
+}
+
+export interface Appointment {
+  id?: number;
+  patient_name: string;
+  phone?: string;
+  age?: number;
+  gender?: string;
+  facility_name: string;
+  doctor_name?: string;
+  appointment_date: string;
+  time_slot: string;
+  reason?: string;
+  priority?: PriorityLevel;
+  status: 'Scheduled' | 'Waiting' | 'In-Consultation' | 'Completed' | 'Cancelled';
+  created_at?: string;
 }
 
 export interface Referral {
@@ -77,7 +136,7 @@ export interface Referral {
   urgency: string;
   reason: string;
   transport_mode: string;
-  status: 'Referred' | 'En Route' | 'Admitted' | 'Completed';
+  status: 'Pending' | 'Accepted' | 'Patient Arrived' | 'Completed' | 'Follow-up' | 'Referred' | 'En Route' | 'Admitted';
   created_at?: string;
 }
 
@@ -110,3 +169,4 @@ export interface AshaIncentiveActivity {
   status: 'Pending' | 'Approved' | 'Disbursed';
   recorded_at?: string;
 }
+

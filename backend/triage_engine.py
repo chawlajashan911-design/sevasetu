@@ -70,7 +70,7 @@ class TriageEngine:
             reason = " | ".join(p1_triggers)
             triggers = p1_triggers
             confidence = 0.96
-            action = "Immediate Medical Attention & Referral to Kharpudi PHC / Manchar RH. 108 Ambulance ready."
+            action = "Immediate Medical Attention & Referral to nearest Emergency Healthcare Facility / Hospital. 108 Ambulance ready."
         elif p2_triggers:
             priority = "P2"
             triage_label = "P2 Urgent"

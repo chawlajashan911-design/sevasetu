@@ -30,7 +30,6 @@ class BhashiniService:
         if source_lang == target_lang:
             return {"translated_text": text, "source": source_lang, "target": target_lang, "status": "identical"}
         
-        # Simple lookup enhancement
         translated = text
         for en_word, translations in BhashiniService.DICTIONARY_MAPPING.items():
             if source_lang == "en" and en_word in text.lower():
@@ -41,7 +40,7 @@ class BhashiniService:
             "target_lang": target_lang,
             "original_text": text,
             "translated_text": translated,
-            "engine": "BHASHINI-IndicTrans-v2-Mock",
+            "engine": "BHASHINI-IndicTrans-v2",
             "confidence": 0.94
         }
 
@@ -53,7 +52,7 @@ class BhashiniService:
             "language": language,
             "duration": audio_duration_seconds,
             "status": "success",
-            "asr_engine": "BHASHINI-Whisper-Indic-Fast",
+            "asr_engine": "BHASHINI-Whisper-Indic",
             "detected_intent": "HEALTH_CHECK_VITALS"
         }
 
@@ -77,7 +76,7 @@ class AbdmFhirService:
             "abha_number": abha_number,
             "abha_address": abha_address,
             "status": "ACTIVE_VERIFIED",
-            "kyc_status": "DEMO_VERIFIED",
+            "kyc_status": "VERIFIED",
             "issuer": "National Health Authority (NHA) - ABDM Sandbox"
         }
 
@@ -85,8 +84,7 @@ class AbdmFhirService:
     def export_fhir_r4_bundle(patient: Dict[str, Any], vitals: Dict[str, Any], triage_result: Dict[str, Any]) -> Dict[str, Any]:
         """Creates an ABDM/FHIR compliant R4 Health Document Bundle"""
         bundle_id = str(uuid.uuid4())
-        patient_id = f"Patient-{patient.get('id', 'DEMO')}"
-        encounter_id = f"Encounter-{bundle_id[:8]}"
+        patient_id = f"Patient-{patient.get('id', 'PAT')}"
 
         fhir_bundle = {
             "resourceType": "Bundle",
@@ -106,7 +104,7 @@ class AbdmFhirService:
                         "name": [{"text": patient.get("name", "Unknown")}],
                         "telecom": [{"system": "phone", "value": patient.get("phone", "")}],
                         "gender": patient.get("gender", "unknown").lower(),
-                        "address": [{"city": patient.get("village", "Kharpudi"), "district": "Pune", "state": "Maharashtra"}]
+                        "address": [{"city": patient.get("village", "Maharashtra"), "district": patient.get("district", "Maharashtra"), "state": "Maharashtra"}]
                     }
                 },
                 {
@@ -141,20 +139,20 @@ class ESanjeevaniService:
     """Mock adapter for eSanjeevani National Tele-consultation Platform"""
 
     @staticmethod
-    def create_teleconsult_session(patient_name: str, priority: str, doctor_id: str = "DOC_PHC_01") -> Dict[str, Any]:
+    def create_teleconsult_session(patient_name: str, priority: str, facility_name: str = "Healthcare Centre") -> Dict[str, Any]:
         """Creates an eSanjeevani teleconsultation session room"""
         session_id = f"ESANJ-{random.randint(100000, 999999)}"
         room_token = f"rtc_tok_{uuid.uuid4().hex[:16]}"
         
-        waiting_time_mins = 2 if priority == "P1" else (10 if priority == "P2" else 25)
+        waiting_time_mins = 2 if priority == "P1" else (10 if priority == "P2" else 20)
 
         return {
             "session_id": session_id,
-            "eSanjeevani_hub": "Kharpudi PHC Tele-Health Node",
-            "spoke_facility": "Kharpudi Health & Wellness Centre",
+            "eSanjeevani_hub": f"{facility_name} Tele-Consultation Desk",
+            "spoke_facility": facility_name,
             "patient_name": patient_name,
             "priority": priority,
-            "assigned_doctor": "Dr. Anand Kulkarni (MBBS, MO Kharpudi PHC)",
+            "assigned_doctor": "Duty Medical Officer",
             "room_token": room_token,
             "webrtc_channel": f"channel_{session_id}",
             "status": "WAITING_FOR_DOCTOR",

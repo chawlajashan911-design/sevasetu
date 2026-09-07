@@ -5,7 +5,7 @@
 # SevaSetu (सेवासेतू / सेवासेतु) - Rural Healthcare AI System
 
 > **Smart Village Health Grid & Tele-care System**  
-> Operational Node: **Kharpudi Primary Health Centre**, Ambegaon Taluka, Pune District, Maharashtra.
+> Operational Node: **Maharashtra Public Health Grid & Primary Care Network**
 
 ---
 
@@ -30,12 +30,12 @@
    - "Offline Mode" toggle with real-time pending sync badge.
    - One-click batch sync (`/api/sync/batch`) when internet is restored.
 
-4. **Emergency SOS & Geolocation**:
-   - Real-time GPS capture with distance calculations to Kharpudi Sub-Centre, Kharpudi PHC, Manchar Rural Hospital, and Pune District Hospital.
+4. **Emergency SOS & Location Dispatch**:
+   - Direct hospital routing using official `hospital_directory.csv` dataset.
    - Direct 108 Ambulance dialer + automated GPS SMS dispatcher (`sms:108?body=...`).
 
 5. **Integrated Digital Health Mock Adapters**:
-   - **ABDM / FHIR**: 14-digit ABHA Card generator + QR code placeholder.
+   - **ABDM / FHIR**: 14-digit ABHA Card generator + QR code.
    - **BHASHINI**: Indic translation & speech engine adapter.
    - **eSanjeevani**: Teleconsultation room suite (Video, Audio, Live Chat, Async Voice+Photo).
 
@@ -59,7 +59,7 @@ pip install -r backend/requirements.txt
 uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-*Note: Database automatically connects to MySQL if `DATABASE_URL` is set (e.g. `DATABASE_URL=mysql+pymysql://root:pass@localhost:3306/rural_health`), and seamlessly defaults to `sqlite:///./rural_healthcare.db` with auto-seeded records for Kharpudi.*
+*Note: Database automatically connects to MySQL if `DATABASE_URL` is set (e.g. `DATABASE_URL=mysql+pymysql://root:pass@localhost:3306/rural_health`), and seamlessly defaults to `sqlite:///./rural_healthcare.db`.*
 
 ### 3. Frontend Setup (React + Tailwind + Vite + Dexie)
 

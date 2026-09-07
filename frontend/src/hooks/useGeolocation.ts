@@ -9,58 +9,44 @@ export interface GeoLocationState {
   loading: boolean;
 }
 
-// Demo fallback: Kharpudi Village Center, Ambegaon Taluka, Pune
-const KHARPUDI_COORDS = {
-  lat: 18.9950,
-  lng: 73.9520,
-  villageName: "Kharpudi Village, Ambegaon, Pune"
+// Neutral fallback center coordinates: Maharashtra State Grid
+const MAHARASHTRA_CENTER = {
+  lat: 18.5204,
+  lng: 73.8567,
+  villageName: "Maharashtra State Grid"
 };
 
 export function useGeolocation() {
   const [location, setLocation] = useState<GeoLocationState>({
-    lat: KHARPUDI_COORDS.lat,
-    lng: KHARPUDI_COORDS.lng,
-    accuracy: 15,
-    villageName: KHARPUDI_COORDS.villageName,
+    lat: MAHARASHTRA_CENTER.lat,
+    lng: MAHARASHTRA_CENTER.lng,
+    accuracy: null,
+    villageName: MAHARASHTRA_CENTER.villageName,
     error: null,
     loading: false
   });
 
   const getGPSLocation = useCallback(() => {
-    if (!navigator.geolocation) {
-      setLocation(prev => ({
-        ...prev,
-        error: 'Geolocation not supported by browser. Using Kharpudi demo coordinates.'
-      }));
-      return;
+    // Village-based selection is prioritized per requirements; no forced browser GPS prompt
+    try {
+      const savedVillage = localStorage.getItem('sevasetu_patient_village');
+      if (savedVillage) {
+        const parsed = JSON.parse(savedVillage);
+        if (parsed.lat && parsed.lng) {
+          setLocation({
+            lat: parsed.lat,
+            lng: parsed.lng,
+            accuracy: 10,
+            villageName: `${parsed.village || ''}, ${parsed.taluka || ''}, ${parsed.district || ''}`.trim(),
+            error: null,
+            loading: false
+          });
+          return;
+        }
+      }
+    } catch {
+      // ignore
     }
-
-    setLocation(prev => ({ ...prev, loading: true, error: null }));
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLocation({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-          villageName: "Live GPS (Kharpudi Vicinity)",
-          error: null,
-          loading: false
-        });
-      },
-      (err) => {
-        console.warn("GPS Permission or signal error, falling back to Kharpudi coordinates:", err);
-        setLocation({
-          lat: KHARPUDI_COORDS.lat,
-          lng: KHARPUDI_COORDS.lng,
-          accuracy: 25,
-          villageName: "Kharpudi Village (Demo Center)",
-          error: null, // silent fallback for seamless demo
-          loading: false
-        });
-      },
-      { enableHighAccuracy: true, timeout: 6000 }
-    );
   }, []);
 
   useEffect(() => {

@@ -1,19 +1,39 @@
 export const translations = {
   mr: {
+    // Welcome & Roles
+    welcome_select_role: "सेवासेतूमध्ये आपले स्वागत आहे – तुमची भूमिका निवडा",
+    welcome_subtitle: "स्मार्ट ग्रामीण आरोग्य व क्लिनिकल ट्रायज प्रणाली • प्राथमिक आरोग्य केंद्र व रुग्णालय नेटवर्क",
+    select_role_desc: "खालीलपैकी योग्य भूमिका निवडून डॅशबोर्डमध्ये प्रवेश करा",
+    switch_role: "भूमिका बदला",
+    logout: "लॉग आउट",
+    demo_badge: "चाचणी डेटा (DEMO)",
+    demo_login_title: "प्रवेश लॉगिन",
+    quick_demo_login: "त्वरित प्रवेश लॉगिन",
+    enter_otp_hint: "कोणताही नंबर टाका किंवा OTP: १२३४५६ वापरा",
+
     // Portals
-    portal_patient: "रुग्ण पोर्टल",
+    portal_patient: "रुग्ण (Patient)",
+    portal_patient_desc: "लक्षणे नोंदवा, AI चाचणी निकाल, जवळची आरोग्य केंद्रे व अपॉइंटमेंट",
+    portal_doctor: "वैद्यकीय अधिकारी (Doctor)",
+    portal_doctor_desc: "अपॉइंटमेंट्स, AI चाचणी पडताळणी, ई-प्रिस्क्रिप्शन व हॉस्पिटल रेफरल",
+    portal_hospital: "रेफरल रुग्णालय (Hospital)",
+    portal_hospital_desc: "इनकमिंग रेफरल केसेस, अति-तातडीचे P1 रुग्ण व रेफरल स्थिती व्यवस्थापन",
+    portal_clinic: "क्लिनिक / प्राथमिक आरोग्य केंद्र (Clinic/PHC)",
+    portal_clinic_desc: "रुग्ण ओपीडी रांग, स्थानिक अपॉइंटमेंट्स, तपासणी व रेफरल तयार करा",
+    portal_health_worker: "आरोग्य कार्यकर्ता / आशा (Health Worker)",
+    portal_health_worker_desc: "गावातील रुग्ण तपासणी, ऑफलाइन सिंक, प्रोत्साहन भत्ता व फॉलो-अप",
     portal_asha: "आशा सेविका पोर्टल",
-    portal_doctor: "वैद्यकीय अधिकारी",
     portal_admin: "तालुका आरोग्य प्रशासन",
 
     // Header & Meta
     app_title: "सेवासेतू",
-    app_subtitle: "खरपुडी प्राथमिक आरोग्य केंद्र, आंबेगाव, पुणे",
+    app_subtitle: "स्मार्ट ग्रामीण आरोग्य व क्लिनिकल ट्रायज प्रणाली",
     live_badge: "आरोग्य विभाग • महाराष्ट्र शासन",
     online_mode: "ऑनलाइन मोड",
     offline_mode: "ऑफलाइन मोड",
     switch_lang: "भाषा निवडा",
     sos_btn: "SOS १०८",
+
 
     // Common
     name: "पूर्ण नाव",
@@ -76,19 +96,19 @@ export const translations = {
 
     // Nearby PHC
     phc_list_title: "जवळची शासकीय आरोग्य केंद्रे",
-    phc_subtitle: "GPS अंतरानुसार शासकीय रुग्णालयांची यादी",
+    phc_subtitle: "शासकीय रुग्णालयांची सूची (Government Hospital Directory)",
     distance: "अंतर",
     call_now: "कॉल करा",
     get_directions: "नकाशा मार्ग",
-    facility_subcentre: "आरोग्य उपकेंद्र, खरपुडी",
-    facility_phc: "प्राथमिक आरोग्य केंद्र, खरपुडी",
-    facility_rh: "ग्रामीण रुग्णालय, मंचर",
-    facility_dh: "जिल्हा रुग्णालय, औंध, पुणे",
+    facility_subcentre: "आरोग्य उपकेंद्र (Sub-Centre)",
+    facility_phc: "प्राथमिक आरोग्य केंद्र (PHC)",
+    facility_rh: "ग्रामीण रुग्णालय (Rural Hospital)",
+    facility_dh: "जिल्हा रुग्णालय (District Hospital)",
 
     // ASHA Portal
     asha_title: "आशा सेविका डिजिटल नोंदवही",
-    asha_name: "सुनिता ताई शिंदे (आशा कार्यकर्ता)",
-    asha_area: "कार्यक्षेत्र: खरपुडी गाव, वडारवाडी, माळी मळा",
+    asha_name: "आरोग्य सेविका (ASHA Worker)",
+    asha_area: "कार्यक्षेत्र: प्राथमिक आरोग्य केंद्र कार्यक्षेत्र",
     pending_sync: "सिंक प्रलंबित नोंदी",
     sync_now: "सर्व नोंदी सर्व्हरवर पाठवा",
     sync_success: "सर्व ऑफलाइन नोंदी यशस्वीरित्या सिंक झाल्या!",
@@ -102,7 +122,7 @@ export const translations = {
 
     // Doctor Portal
     doctor_title: "वैद्यकीय अधिकारी रुग्ण तपासणी कक्ष",
-    doctor_name_title: "डॉ. आनंद कुलकर्णी (M.B.B.S, MO खरपुडी PHC)",
+    doctor_name_title: "वैद्यकीय अधिकारी (Medical Officer / MO)",
     triage_queue: "प्राधान्यक्रमानुसार रुग्ण यादी",
     tab_all: "सर्व रुग्ण",
     tab_p1: "P1 तातडीचे",
@@ -117,7 +137,7 @@ export const translations = {
 
     // Admin Portal
     admin_title: "तालुका आरोग्य प्रशासन डॅशबोर्ड",
-    admin_subtitle: "तालुका: आंबेगाव • प्राथमिक केंद्र: खरपुडी",
+    admin_subtitle: "सार्वजनिक आरोग्य विभाग, महाराष्ट्र शासन",
     kpi_screened: "एकूण तपासलेले रुग्ण",
     kpi_critical: "P1 अतिगंभीर रुग्ण",
     kpi_referrals: "सक्रिय रेफरल्स",
@@ -128,20 +148,40 @@ export const translations = {
     refresh_dashboard: "डॅशबोर्ड रिफ्रेश करा",
   },
   hi: {
+    // Welcome & Roles
+    welcome_select_role: "सेवासेतु में आपका स्वागत है – अपनी भूमिका चुनें",
+    welcome_subtitle: "स्मार्ट ग्रामीण स्वास्थ्य एवं क्लिनिकल ट्रायज प्रणाली • प्राथमिक स्वास्थ्य केंद्र एवं अस्पताल नेटवर्क",
+    select_role_desc: "डैशबोर्ड में प्रवेश करने के लिए नीचे से अपनी भूमिका का चयन करें",
+    switch_role: "भूमिका बदलें",
+    logout: "लॉग आउट",
+    demo_badge: "चाचणी डेटा (DEMO)",
+    demo_login_title: "प्रवेश लॉगिन",
+    quick_demo_login: "त्वरित प्रवेश लॉगिन",
+    enter_otp_hint: "कोई भी मोबाइल नंबर या OTP: 123456 दर्ज करें",
+
     // Portals
-    portal_patient: "मरीज पोर्टल",
+    portal_patient: "मरीज (Patient)",
+    portal_patient_desc: "लक्षण दर्ज करें, AI जांच परिणाम, नजदीकी स्वास्थ्य केंद्र व अपॉइंटमेंट",
+    portal_doctor: "चिकित्सा अधिकारी (Doctor)",
+    portal_doctor_desc: "अपॉइंटमेंट्स, AI प्राथमिकता सत्यापन, ई-प्रिस्क्रिप्शन व रेफरल",
+    portal_hospital: "रेफरल अस्पताल (Hospital)",
+    portal_hospital_desc: "इनकमिंग रेफरल केसेस, अति गंभीर P1 मरीज व रेफरल स्थिति प्रबंधन",
+    portal_clinic: "क्लिनिक / प्राथमिक स्वास्थ्य केंद्र (Clinic/PHC)",
+    portal_clinic_desc: "मरीज ओपीडी कतार, स्थानीय अपॉइंटमेंट्स, जांच व उच्च केंद्र रेफरल",
+    portal_health_worker: "स्वास्थ्य कार्यकर्ता / आशा (Health Worker)",
+    portal_health_worker_desc: "गांव के मरीजों की जांच, ऑफलाइन सिंक, प्रोत्साहन राशि व फॉलो-अप",
     portal_asha: "आशा दीदी पोर्टल",
-    portal_doctor: "चिकित्सा अधिकारी",
     portal_admin: "जिला स्वास्थ्य प्रशासन",
 
     // Header & Meta
     app_title: "सेवासेतु",
-    app_subtitle: "खरपुडी प्राथमिक स्वास्थ्य केंद्र, आम्बेगांव, पुणे",
+    app_subtitle: "स्मार्ट ग्रामीण स्वास्थ्य एवं क्लिनिकल ट्रायज प्रणाली",
     live_badge: "स्वास्थ्य विभाग • महाराष्ट्र शासन",
     online_mode: "ऑनलाइन मोड",
     offline_mode: "ऑफलाइन मोड",
     switch_lang: "भाषा चुनें",
     sos_btn: "SOS 108",
+
 
     // Common
     name: "पूरा नाम",
@@ -204,19 +244,19 @@ export const translations = {
 
     // Nearby PHC
     phc_list_title: "नजदीकी सरकारी स्वास्थ्य केंद्र",
-    phc_subtitle: "GPS दूरी के अनुसार सरकारी अस्पतालों की सूची",
+    phc_subtitle: "सरकारी अस्पतालों की सूची (Government Hospital Directory)",
     distance: "दूरी",
     call_now: "कॉल करें",
     get_directions: "रास्ता देखें",
-    facility_subcentre: "स्वास्थ्य उपकेंद्र, खरपुडी",
-    facility_phc: "प्राथमिक स्वास्थ्य केंद्र, खरपुडी",
-    facility_rh: "ग्रामीण अस्पताल, मंचर",
-    facility_dh: "जिला अस्पताल, औंध, पुणे",
+    facility_subcentre: "स्वास्थ्य उपकेंद्र (Sub-Centre)",
+    facility_phc: "प्राथमिक स्वास्थ्य केंद्र (PHC)",
+    facility_rh: "ग्रामीण अस्पताल (Rural Hospital)",
+    facility_dh: "जिला अस्पताल (District Hospital)",
 
     // ASHA Portal
     asha_title: "आशा कार्यकर्ता डिजिटल रजिस्टर",
-    asha_name: "सुनीता ताई शिंदे (आशा कार्यकर्ता)",
-    asha_area: "कार्यक्षेत्र: खरपुडी गांव, वडारवाडी, माली माला",
+    asha_name: "स्वास्थ्य कार्यकर्ता (ASHA Worker)",
+    asha_area: "कार्यक्षेत्र: प्राथमिक स्वास्थ्य केंद्र कार्यक्षेत्र",
     pending_sync: "सिंक पेंडिंग रिकॉर्ड",
     sync_now: "सभी रिकॉर्ड मुख्य सर्वर पर सिंक करें",
     sync_success: "सभी ऑफलाइन रिकॉर्ड सफलतापूर्वक सिंक हो गए!",
@@ -230,7 +270,7 @@ export const translations = {
 
     // Doctor Portal
     doctor_title: "चिकित्सा अधिकारी जांच कक्ष",
-    doctor_name_title: "डॉ. आनंद कुलकर्णी (M.B.B.S, MO खरपुडी PHC)",
+    doctor_name_title: "चिकित्सा अधिकारी (Medical Officer / MO)",
     triage_queue: "प्राथमिकता के आधार पर मरीज कतार",
     tab_all: "सभी मरीज",
     tab_p1: "P1 अति गंभीर",
@@ -245,7 +285,7 @@ export const translations = {
 
     // Admin Portal
     admin_title: "प्रशासनिक स्वास्थ्य डैशबोर्ड",
-    admin_subtitle: "तालुका: आम्बेगांव • प्राथमिक केंद्र: खरपुडी",
+    admin_subtitle: "सार्वजनिक स्वास्थ्य विभाग, महाराष्ट्र शासन",
     kpi_screened: "कुल जांचे गए मरीज",
     kpi_critical: "P1 अति गंभीर केस",
     kpi_referrals: "सक्रिय रेफरल्स",
@@ -256,20 +296,40 @@ export const translations = {
     refresh_dashboard: "डैशबोर्ड रिफ्रेश करें",
   },
   en: {
+    // Welcome & Roles
+    welcome_select_role: "Welcome to SevaSetu – Select your role",
+    welcome_subtitle: "Smart Rural Healthcare AI Platform • Primary Care & Hospital Grid",
+    select_role_desc: "Select a role below to access the specialized healthcare dashboard",
+    switch_role: "Switch Role",
+    logout: "Logout",
+    demo_badge: "DEMO DATA",
+    demo_login_title: "Portal Access",
+    quick_demo_login: "Quick Portal Access",
+    enter_otp_hint: "Enter any phone number or OTP: 123456",
+
     // Portals
-    portal_patient: "Patient Portal",
+    portal_patient: "Patient",
+    portal_patient_desc: "Log symptoms, run digital triage, find nearby facilities & book appointments",
+    portal_doctor: "Doctor",
+    portal_doctor_desc: "Today's appointments, triage verification, consultation notes & referrals",
+    portal_hospital: "Hospital",
+    portal_hospital_desc: "Incoming referrals, high-risk cases & referral status progression",
+    portal_clinic: "Clinic / PHC",
+    portal_clinic_desc: "Patient queue, appointments, OPD consultation & create referrals",
+    portal_health_worker: "Health Worker",
+    portal_health_worker_desc: "Village patients, offline screening, NHM incentives & follow-ups",
     portal_asha: "ASHA Worker Portal",
-    portal_doctor: "Doctor Portal",
     portal_admin: "District Admin Portal",
 
     // Header & Meta
     app_title: "SevaSetu",
-    app_subtitle: "Kharpudi Primary Health Centre, Ambegaon, Pune",
+    app_subtitle: "Smart Rural Healthcare AI Platform",
     live_badge: "Health Grid • Active System",
     online_mode: "Online Mode",
     offline_mode: "Offline Mode",
     switch_lang: "Language",
     sos_btn: "SOS 108",
+
 
     // Common
     name: "Full Name",
@@ -296,7 +356,7 @@ export const translations = {
     abha_card: "ABHA Health Card (ABDM)",
     track_referral: "Track Referral Status",
     emergency_sos: "Emergency SOS (108)",
-    sos_hint: "Trigger instant GPS distress alert to 108 Ambulance and Kharpudi PHC",
+    sos_hint: "Trigger instant distress alert to 108 Ambulance & Nearest PHC",
     demo_presets: "Sample Presets:",
     preset_p1: "P1 Critical",
     preset_p2: "P2 Urgent",
@@ -332,19 +392,19 @@ export const translations = {
 
     // Nearby PHC
     phc_list_title: "Nearby Healthcare Facilities",
-    phc_subtitle: "Government facilities sorted by real-time GPS distance",
+    phc_subtitle: "Government facilities from Hospital Directory",
     distance: "Distance",
     call_now: "Call Hospital",
     get_directions: "Directions",
-    facility_subcentre: "Kharpudi Sub-Centre",
-    facility_phc: "Kharpudi Primary Health Centre",
-    facility_rh: "Manchar Rural Hospital",
-    facility_dh: "Pune District Hospital",
+    facility_subcentre: "Primary Health Sub-Centre",
+    facility_phc: "Primary Health Centre (PHC)",
+    facility_rh: "Rural Hospital (RH)",
+    facility_dh: "District Hospital (DH)",
 
     // ASHA Portal
     asha_title: "ASHA Worker Digital Field Register",
-    asha_name: "Sunita Tai Shinde (ASHA Worker)",
-    asha_area: "Area: Kharpudi Village, Wadarwadi, Mali Mala",
+    asha_name: "Community Health Worker (ASHA)",
+    asha_area: "Area: Primary Care Catchment Circle",
     pending_sync: "Pending Offline Records",
     sync_now: "Sync All to Central Server",
     sync_success: "All offline records successfully synchronized!",
@@ -358,7 +418,7 @@ export const translations = {
 
     // Doctor Portal
     doctor_title: "Medical Officer Consultation & Triage Desk",
-    doctor_name_title: "Dr. Anand Kulkarni (MBBS, MO Kharpudi PHC)",
+    doctor_name_title: "Medical Officer (MBBS, Primary Care)",
     triage_queue: "Priority Triage Queue",
     tab_all: "All Patients",
     tab_p1: "P1 Critical",
@@ -372,8 +432,8 @@ export const translations = {
     select_patient_prompt: "Select a patient from the queue to start clinical review.",
 
     // Admin Portal
-    admin_title: "Taluka Health Administration Dashboard",
-    admin_subtitle: "Taluka: Ambegaon • Primary Facility: Kharpudi PHC",
+    admin_title: "Health Administration Dashboard",
+    admin_subtitle: "Public Health Department, Government of Maharashtra",
     kpi_screened: "Total Screened",
     kpi_critical: "P1 Critical Cases",
     kpi_referrals: "Active Referrals",

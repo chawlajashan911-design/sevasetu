@@ -173,7 +173,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ language }) => {
             <div className="flex items-center space-x-2">
               <Pill className="w-5 h-5 text-teal-600" />
               <h3 className="text-base font-black text-slate-900">
-                {language === 'mr' ? 'खरपुडी PHC औषध साठा' : language === 'hi' ? 'खरपुडी PHC दवा स्टॉक' : 'PHC Medicine Inventory (Kharpudi)'}
+                {language === 'mr' ? 'प्राथमिक आरोग्य केंद्र औषध साठा' : language === 'hi' ? 'प्राथमिक स्वास्थ्य केंद्र दवा स्टॉक' : 'PHC Essential Medicine Inventory'}
               </h3>
             </div>
             <span className="text-xs font-bold text-slate-500">
@@ -319,19 +319,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ language }) => {
             </h4>
             <div className="flex items-center justify-between text-center text-[11px] font-bold text-slate-700">
               <div className="p-2 bg-white rounded-xl border border-slate-300 flex-1">
-                {language === 'mr' ? 'उप-केंद्र (0.8km)' : language === 'hi' ? 'उप-केंद्र (0.8km)' : 'Sub-Centre (0.8km)'}
+                {language === 'mr' ? 'उप-केंद्र (Sub-Centre)' : language === 'hi' ? 'उप-केंद्र (Sub-Centre)' : 'Sub-Centre (Primary)'}
               </div>
               <span className="mx-1 text-slate-400">➔</span>
               <div className="p-2 bg-teal-100 text-teal-950 rounded-xl border border-teal-300 flex-1">
-                {language === 'mr' ? 'खरपुडी PHC (2.5km)' : language === 'hi' ? 'खरपुडी PHC (2.5km)' : 'Kharpudi PHC (2.5km)'}
+                {language === 'mr' ? 'प्राथमिक केंद्र (PHC)' : language === 'hi' ? 'प्राथमिक केंद्र (PHC)' : 'PHC (Secondary)'}
               </div>
               <span className="mx-1 text-slate-400">➔</span>
               <div className="p-2 bg-blue-100 text-blue-950 rounded-xl border border-blue-300 flex-1">
-                {language === 'mr' ? 'मंचर RH (12km)' : language === 'hi' ? 'मंचर RH (12km)' : 'Manchar RH (12km)'}
+                {language === 'mr' ? 'ग्रामीण रुग्णालय (RH)' : language === 'hi' ? 'ग्रामीण अस्पताल (RH)' : 'Rural Hospital (RH)'}
               </div>
               <span className="mx-1 text-slate-400">➔</span>
               <div className="p-2 bg-purple-100 text-purple-950 rounded-xl border border-purple-300 flex-1">
-                {language === 'mr' ? 'पुणे DH (65km)' : language === 'hi' ? 'पुणे DH (65km)' : 'Pune DH (65km)'}
+                {language === 'mr' ? 'जिल्हा रुग्णालय (DH)' : language === 'hi' ? 'जिला अस्पताल (DH)' : 'District Hospital (DH)'}
               </div>
             </div>
           </div>

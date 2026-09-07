@@ -18,8 +18,10 @@ class PatientCreate(BaseModel):
     age: int
     gender: str
     phone: str
-    village: Optional[str] = "Kharpudi"
-    wadi: Optional[str] = "Gaothan"
+    village: Optional[str] = None
+    taluka: Optional[str] = None
+    district: Optional[str] = None
+    wadi: Optional[str] = None
     preferred_language: Optional[str] = "mr"
     abha_id: Optional[str] = None
 
@@ -36,7 +38,9 @@ class TriageEvaluationRequest(BaseModel):
     age: int
     gender: str
     phone: Optional[str] = None
-    village: Optional[str] = "Kharpudi"
+    village: Optional[str] = None
+    taluka: Optional[str] = None
+    district: Optional[str] = None
     vitals: VitalsInput
     source: Optional[str] = "Patient"
 
@@ -65,11 +69,35 @@ class ReferralCreate(BaseModel):
     patient_name: str
     age: int
     priority: str
-    source_facility: str = "Kharpudi PHC"
+    source_facility: Optional[str] = None
     target_facility: str
     urgency: str = "Immediate"
     reason: str
-    transport_mode: str = "108 Ambulance"
+    transport_mode: str = "108 Emergency Ambulance"
+    status: Optional[str] = "Pending"
+
+class AppointmentCreate(BaseModel):
+    patient_name: str
+    phone: Optional[str] = None
+    age: Optional[int] = None
+    gender: Optional[str] = None
+    facility_name: str
+    doctor_name: Optional[str] = None
+    appointment_date: str
+    time_slot: str
+    reason: Optional[str] = "OPD Consultation"
+    priority: Optional[str] = "P3"
+    status: Optional[str] = "Scheduled"
+
+class AppointmentResponse(AppointmentCreate):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class AppointmentStatusUpdate(BaseModel):
+    status: str
 
 class BatchSyncItem(BaseModel):
     local_id: str
@@ -77,7 +105,7 @@ class BatchSyncItem(BaseModel):
     age: int
     gender: str
     phone: Optional[str] = None
-    village: str = "Kharpudi"
+    village: Optional[str] = None
     vitals: VitalsInput
     priority: str
     triage_reason: str
