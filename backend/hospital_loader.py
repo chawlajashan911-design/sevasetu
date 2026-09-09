@@ -1,9 +1,20 @@
-import csv
-import os
+"""
+Hospital directory queries — backed by Supabase PostgreSQL (hospitals table).
+All 4,807 Maharashtra hospitals are pre-loaded via migrate_data.py.
+This module provides the same API surface as the old CSV-based HospitalDirectory class
+so main.py needs zero changes in how it calls search/search_by_name/get_by_name_or_id.
+"""
 import math
 from typing import List, Dict, Optional, Any
 
+from sqlalchemy.orm import Session
+from sqlalchemy import or_, func
+
+from .models import Hospital
+
+
 # Standard reference center coordinates for Maharashtra districts
+# Used for distance sorting when no explicit lat/lng is provided
 DISTRICT_CENTERS: Dict[str, tuple] = {
     'thane': (19.2183, 72.9781),
     'pune': (18.5204, 73.8567),
@@ -43,131 +54,83 @@ DISTRICT_CENTERS: Dict[str, tuple] = {
     'dhule': (20.9042, 74.7749),
     'nandurbar': (21.3712, 74.2404),
     'washim': (20.1114, 77.1332),
-    'buldhana': (20.5292, 76.1843)
+    'buldhana': (20.5292, 76.1843),
 }
 
-def clean_val(val: Any) -> Optional[str]:
-    """Cleans 0, null, None, and empty placeholder values cleanly"""
-    if val is None:
-        return None
-    s = str(val).strip()
-    if s in ['0', '0.0', 'NULL', 'null', 'None', 'NA', 'N/A', '', '-', '0, 0', '0,0']:
-        return None
-    return s
-
-def parse_coords(coord_str: Optional[str]) -> Optional[Dict[str, float]]:
-    """Parses Location_Coordinates string into valid {lat, lng} dict"""
-    if not coord_str:
-        return None
-    s = str(coord_str).strip()
-    if s in ['0', '0,0', '0.0, 0.0', '']:
-        return None
-    parts = s.split(',')
-    if len(parts) == 2:
-        try:
-            lat = float(parts[0].strip())
-            lng = float(parts[1].strip())
-            if -90 <= lat <= 90 and -180 <= lng <= 180 and (lat != 0 or lng != 0):
-                return {'lat': round(lat, 6), 'lng': round(lng, 6)}
-        except (ValueError, TypeError):
-            pass
-    return None
 
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculates great-circle distance in kilometers between two points"""
+    """Calculates great-circle distance in km between two coordinates."""
     R = 6371.0
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return round(R * c, 1)
+    a = (math.sin(dlat / 2) ** 2
+         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
+    return round(R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)), 1)
+
+
+def _hospital_to_dict(h: Hospital, ref_lat: float, ref_lng: float) -> Dict[str, Any]:
+    """Converts a Hospital ORM row to the dict shape the frontend expects."""
+    coords = None
+    distance_km = 12.0  # default fallback
+
+    if h.lat and h.lng:
+        coords = {'lat': h.lat, 'lng': h.lng}
+        distance_km = haversine(ref_lat, ref_lng, h.lat, h.lng)
+
+    return {
+        'id': h.id,
+        'name': h.name,
+        'category': h.category or 'Healthcare Facility',
+        'care_type': h.care_type or 'Hospital',
+        'address': h.address or f'{h.subdistrict}, {h.district}' if h.subdistrict else (h.district or 'Maharashtra'),
+        'district': h.district or 'Maharashtra',
+        'subdistrict': h.subdistrict,
+        'village': h.village,
+        'pincode': h.pincode,
+        'coordinates': coords,
+        'specialties': h.specialties,
+        'facilities': h.facilities,
+        'emergency_services': h.emergency_services,
+        'ambulance': h.ambulance,
+        'phone': h.phone,
+        'doctors': h.doctors,
+        'beds': h.beds,
+        'status': h.status or 'Open',
+        'distance_km': distance_km,
+    }
+
+
+def _resolve_ref_coords(district: Optional[str], lat: Optional[float], lng: Optional[float]):
+    """Returns best available reference coordinates for distance sorting."""
+    if lat is not None and lng is not None:
+        return lat, lng
+    if district:
+        d_lower = district.strip().lower()
+        for d_name, d_coords in DISTRICT_CENTERS.items():
+            if d_name in d_lower or d_lower in d_name:
+                return d_coords
+    return 19.2183, 72.9781  # Default: Thane centre
 
 
 class HospitalDirectory:
-    def __init__(self):
-        self.hospitals: List[Dict[str, Any]] = []
-        self.load_csv()
+    """
+    Drop-in replacement for the old CSV-based HospitalDirectory.
+    All methods accept the same arguments and return the same dict shapes
+    so main.py and the frontend require zero changes.
+    """
 
-    def load_csv(self):
-        csv_path = os.path.join(os.path.dirname(__file__), "hospital_directory.csv")
-        if not os.path.exists(csv_path):
-            csv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "hospital_directory.csv")
-
-        if not os.path.exists(csv_path):
-            print(f"Warning: hospital_directory.csv not found at {csv_path}")
-            return
-
-        loaded: List[Dict[str, Any]] = []
+    @property
+    def hospitals(self) -> List[Dict[str, Any]]:
+        """
+        Returns total count list (lightweight — only used for len() in health check).
+        Avoid calling this for search; use search() instead.
+        """
+        from .database import SessionLocal
+        db: Session = SessionLocal()
         try:
-            with open(csv_path, mode='r', encoding='utf-8', errors='ignore') as f:
-                reader = csv.DictReader(f)
-                for idx, r in enumerate(reader):
-                    state = (r.get('State') or '').strip()
-                    # Filter hospitals to Maharashtra
-                    if state.lower() != 'maharashtra':
-                        continue
-
-                    name = clean_val(r.get('Hospital_Name'))
-                    if not name:
-                        continue
-
-                    coords = parse_coords(r.get('Location_Coordinates'))
-                    
-                    # Phones & emergency contacts
-                    phone = (
-                        clean_val(r.get('Telephone')) or 
-                        clean_val(r.get('Mobile_Number')) or 
-                        clean_val(r.get('Emergency_Num')) or 
-                        clean_val(r.get('Helpline')) or 
-                        clean_val(r.get('Tollfree')) or
-                        clean_val(r.get('Nodal_Person_Tele'))
-                    )
-                    ambulance = clean_val(r.get('Ambulance_Phone_No'))
-                    
-                    # Beds & Doctors (parse digits or None)
-                    beds_raw = clean_val(r.get('Total_Num_Beds'))
-                    beds = int(beds_raw) if (beds_raw and beds_raw.isdigit() and int(beds_raw) > 0) else None
-                    
-                    doctors_raw = clean_val(r.get('Number_Doctor')) or clean_val(r.get('Num_Mediconsultant_or_Expert'))
-                    doctors = int(doctors_raw) if (doctors_raw and doctors_raw.isdigit() and int(doctors_raw) > 0) else None
-
-                    emergency = clean_val(r.get('Emergency_Services'))
-                    specialties = clean_val(r.get('Specialties'))
-                    facilities = clean_val(r.get('Facilities'))
-                    care_type = clean_val(r.get('Hospital_Care_Type'))
-                    category = clean_val(r.get('Hospital_Category'))
-                    
-                    address = clean_val(r.get('Address_Original_First_Line')) or clean_val(r.get('Location'))
-                    district = clean_val(r.get('District'))
-                    subdistrict = clean_val(r.get('Subdistrict'))
-                    village = clean_val(r.get('Village')) or clean_val(r.get('Town')) or clean_val(r.get('Subtown'))
-                    pincode = clean_val(r.get('Pincode'))
-
-                    loaded.append({
-                        'id': f'hosp-{idx+1}',
-                        'name': name,
-                        'category': category or 'Healthcare Facility',
-                        'care_type': care_type or 'Hospital',
-                        'address': address or (f'{subdistrict}, {district}' if subdistrict else district or 'Maharashtra'),
-                        'district': district or 'Maharashtra',
-                        'subdistrict': subdistrict,
-                        'village': village,
-                        'pincode': pincode,
-                        'coordinates': coords,
-                        'specialties': specialties,
-                        'facilities': facilities,
-                        'emergency_services': emergency,
-                        'ambulance': ambulance,
-                        'phone': phone,
-                        'doctors': doctors,
-                        'beds': beds,
-                        'status': 'Operational (24x7)' if (emergency or 'Hospital' in (care_type or '')) else 'Open'
-                    })
-
-            self.hospitals = loaded
-            print(f"Loaded {len(self.hospitals)} authentic Maharashtra hospitals from hospital_directory.csv.")
-        except Exception as e:
-            print(f"Error loading hospital directory CSV: {e}")
+            return [{'id': h.id} for h in db.query(Hospital.id).all()]
+        finally:
+            db.close()
 
     def search(
         self,
@@ -178,148 +141,124 @@ class HospitalDirectory:
         lat: Optional[float] = None,
         lng: Optional[float] = None,
         category: Optional[str] = None,
-        limit: int = 40
+        limit: int = 40,
     ) -> List[Dict[str, Any]]:
         """
-        Searches, filters by district/taluka/village, and sorts hospitals by proximity using coordinates.
+        Returns authentic government & registered hospitals from Supabase hospitals table
+        filtered by district/taluka/village, sorted by proximity.
         """
-        results = []
-        district_clean = district.strip().lower() if district else None
-        taluka_clean = taluka.strip().lower() if taluka else None
-        query_clean = query.strip().lower() if query else None
+        from .database import SessionLocal
+        db: Session = SessionLocal()
+        try:
+            q = db.query(Hospital)
 
-        # Determine reference coordinates for distance sorting
-        ref_lat = lat
-        ref_lng = lng
+            if district:
+                q = q.filter(Hospital.district.ilike(f'%{district}%'))
 
-        if (ref_lat is None or ref_lng is None) and district_clean:
-            # Check district center coordinates
-            for d_name, d_coords in DISTRICT_CENTERS.items():
-                if d_name in district_clean or district_clean in d_name:
-                    ref_lat, ref_lng = d_coords
-                    break
-
-        # If still no coordinates, default to Thane center (19.2183, 72.9781)
-        if ref_lat is None or ref_lng is None:
-            ref_lat, ref_lng = (19.2183, 72.9781)
-
-        for h in self.hospitals:
-            h_district = (h.get('district') or '').lower()
-            h_subdistrict = (h.get('subdistrict') or '').lower()
-            h_village = (h.get('village') or '').lower()
-            h_name = (h.get('name') or '').lower()
-            h_spec = (h.get('specialties') or '').lower()
-            h_fac = (h.get('facilities') or '').lower()
-            h_addr = (h.get('address') or '').lower()
-
-            # District filtering if specified
-            if district_clean:
-                # Direct match or partial match on district name
-                is_district_match = (
-                    district_clean in h_district or 
-                    h_district in district_clean or
-                    district_clean in h_addr
+            if query:
+                q = q.filter(
+                    or_(
+                        Hospital.name.ilike(f'%{query}%'),
+                        Hospital.specialties.ilike(f'%{query}%'),
+                        Hospital.facilities.ilike(f'%{query}%'),
+                        Hospital.address.ilike(f'%{query}%'),
+                        Hospital.district.ilike(f'%{query}%'),
+                        Hospital.subdistrict.ilike(f'%{query}%'),
+                    )
                 )
-                if not is_district_match:
-                    continue
 
-            # Query search if provided
-            if query_clean:
-                if not (
-                    query_clean in h_name or
-                    query_clean in h_spec or
-                    query_clean in h_fac or
-                    query_clean in h_addr or
-                    query_clean in h_district or
-                    query_clean in h_subdistrict
-                ):
-                    continue
-
-            # Category filter if provided
             if category and category != 'All':
-                cat_lower = category.lower()
-                h_care = (h.get('care_type') or '').lower()
-                h_cat = (h.get('category') or '').lower()
-                if not (cat_lower in h_care or cat_lower in h_cat or cat_lower in h_spec):
-                    continue
+                q = q.filter(
+                    or_(
+                        Hospital.care_type.ilike(f'%{category}%'),
+                        Hospital.category.ilike(f'%{category}%'),
+                        Hospital.specialties.ilike(f'%{category}%'),
+                    )
+                )
 
-            # Calculate distance if hospital coordinates are available
-            item = dict(h)
-            coords = h.get('coordinates')
-            if coords and isinstance(coords, dict) and 'lat' in coords and 'lng' in coords:
-                h_lat = coords['lat']
-                h_lng = coords['lng']
-                dist = haversine(ref_lat, ref_lng, h_lat, h_lng)
-                item['distance_km'] = dist
+            rows = q.limit(limit * 3).all()  # Fetch extra for distance re-sorting
+
+            ref_lat, ref_lng = _resolve_ref_coords(district, lat, lng)
+            results = [_hospital_to_dict(h, ref_lat, ref_lng) for h in rows]
+
+            # Sort by distance
+            results.sort(key=lambda x: x.get('distance_km', 999))
+
+            # If < 5 results with district filter, widen to all districts sorted by proximity
+            if len(results) < 5 and district:
+                wider = db.query(Hospital).filter(
+                    Hospital.id.notin_([r['id'] for r in results])
+                ).limit(20).all()
+                wider_dicts = [_hospital_to_dict(h, ref_lat, ref_lng) for h in wider]
+                wider_dicts.sort(key=lambda x: x.get('distance_km', 999))
+                results.extend(wider_dicts[:10])
+
+            return results[:limit]
+        finally:
+            db.close()
+
+    def search_by_name(
+        self,
+        query: str,
+        district: Optional[str] = None,
+        limit: int = 30,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fast autocomplete search by hospital name.
+        Used by HospitalSearchSelect and hospital login selector.
+        Returns list of facility dicts (same shape as search()).
+        """
+        from .database import SessionLocal
+        db: Session = SessionLocal()
+        try:
+            q_str = (query or '').strip()
+            q = db.query(Hospital)
+
+            if district:
+                q = q.filter(Hospital.district.ilike(f'%{district}%'))
+
+            if q_str:
+                # Prefix matches first via ILIKE, then general substring
+                prefix_q = q.filter(Hospital.name.ilike(f'{q_str}%')).limit(limit)
+                prefix_results = prefix_q.all()
+                prefix_ids = {h.id for h in prefix_results}
+
+                substr_q = q.filter(
+                    Hospital.name.ilike(f'%{q_str}%'),
+                    Hospital.id.notin_(prefix_ids)
+                ).limit(limit)
+                substr_results = substr_q.all()
+
+                rows = prefix_results + substr_results
             else:
-                # If no direct coordinates on hospital, assign default proximity based on subdistrict match
-                if taluka_clean and (taluka_clean in h_subdistrict or taluka_clean in h_addr or taluka_clean in h_village):
-                    item['distance_km'] = 3.5
-                else:
-                    item['distance_km'] = 12.0
+                rows = q.limit(limit).all()
 
-            results.append(item)
-
-        # Sort: hospitals with coordinates & lower distance first, then others
-        results.sort(key=lambda x: (x.get('distance_km') is None, x.get('distance_km', 999)))
-
-        # If district was queried but yielded < 5 results, add closest hospitals from other districts
-        if len(results) < 5 and district_clean:
-            additional = []
-            for h in self.hospitals:
-                if h['id'] not in [r['id'] for r in results]:
-                    item = dict(h)
-                    coords = h.get('coordinates')
-                    if coords and isinstance(coords, dict) and 'lat' in coords:
-                        dist = haversine(ref_lat, ref_lng, coords['lat'], coords['lng'])
-                        item['distance_km'] = dist
-                        additional.append(item)
-            additional.sort(key=lambda x: x.get('distance_km', 999))
-            results.extend(additional[:10])
-
-        return results[:limit]
-
-    def search_by_name(self, query: str, district: Optional[str] = None, limit: int = 30) -> List[Dict[str, Any]]:
-        """
-        Fast auto-complete search for hospital login by hospital name, district, or address.
-        """
-        q = (query or '').strip().lower()
-        d = (district or '').strip().lower() if district else None
-        
-        matches = []
-        prefix_matches = []
-        substr_matches = []
-
-        for h in self.hospitals:
-            name = (h.get('name') or '').lower()
-            h_dist = (h.get('district') or '').lower()
-            h_addr = (h.get('address') or '').lower()
-
-            if d and d not in h_dist:
-                continue
-
-            if not q:
-                matches.append(h)
-                if len(matches) >= limit:
-                    break
-                continue
-
-            if name.startswith(q):
-                prefix_matches.append(h)
-            elif q in name or q in h_addr or q in h_dist:
-                substr_matches.append(h)
-
-            if len(prefix_matches) + len(substr_matches) >= limit * 2:
-                break
-
-        return (prefix_matches + substr_matches)[:limit]
+            ref_lat, ref_lng = _resolve_ref_coords(district, None, None)
+            return [_hospital_to_dict(h, ref_lat, ref_lng) for h in rows[:limit]]
+        finally:
+            db.close()
 
     def get_by_name_or_id(self, identifier: str) -> Optional[Dict[str, Any]]:
-        ident = (identifier or '').strip().lower()
-        for h in self.hospitals:
-            if h.get('id', '').lower() == ident or h.get('name', '').lower() == ident:
-                return h
-        return None
+        """Fetches a single hospital by its id string or exact name."""
+        from .database import SessionLocal
+        db: Session = SessionLocal()
+        try:
+            ident = (identifier or '').strip()
+            h = (
+                db.query(Hospital)
+                .filter(or_(
+                    func.lower(Hospital.id) == ident.lower(),
+                    func.lower(Hospital.name) == ident.lower(),
+                ))
+                .first()
+            )
+            if not h:
+                return None
+            ref_lat, ref_lng = _resolve_ref_coords(h.district, None, None)
+            return _hospital_to_dict(h, ref_lat, ref_lng)
+        finally:
+            db.close()
 
-# Global singleton instance
+
+# Global singleton — same as before, main.py imports this
 hospital_directory = HospitalDirectory()

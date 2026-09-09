@@ -1,13 +1,20 @@
 import os
 from datetime import datetime
 from typing import List, Optional
+
+from dotenv import load_dotenv
+load_dotenv()  # Load .env for local development
+
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, case
+from sqlalchemy import desc, case, or_, func
 
 from .database import engine, Base, get_db
-from .models import Patient, TriageRecord, Referral, Appointment, Inventory, OutbreakCluster, AshaIncentive
+from .models import (
+    Patient, TriageRecord, Referral, Appointment,
+    Inventory, OutbreakCluster, AshaIncentive, Village
+)
 from .schemas import (
     PatientCreate, PatientResponse,
     TriageEvaluationRequest, TriageEvaluationResponse,
@@ -20,22 +27,7 @@ from .mock_services import BhashiniService, AbdmFhirService, ESanjeevaniService
 from .seed_data import seed_database, FACILITIES
 from .hospital_loader import hospital_directory
 
-# Load authentic Maharashtra Village dataset (44,810 villages)
-VILLAGES_DATASET_PATH = os.path.join(os.path.dirname(__file__), "maharashtra_villages_website.json")
-if not os.path.exists(VILLAGES_DATASET_PATH):
-    VILLAGES_DATASET_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "maharashtra_villages_website.json")
-
-MAHARASHTRA_VILLAGES = []
-if os.path.exists(VILLAGES_DATASET_PATH):
-    try:
-        import json
-        with open(VILLAGES_DATASET_PATH, "r", encoding="utf-8") as f:
-            MAHARASHTRA_VILLAGES = json.load(f)
-        print(f"Loaded {len(MAHARASHTRA_VILLAGES)} authentic Maharashtra villages into memory.")
-    except Exception as e:
-        print(f"Error loading villages dataset: {e}")
-
-# Initialize DB tables
+# Initialize DB tables (creates any missing tables — idempotent on Supabase)
 Base.metadata.create_all(bind=engine)
 
 # Seed database structure cleanly (no demo records)
@@ -57,27 +49,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # ----------------- Root & Health -----------------
 @app.get("/")
-def read_root():
+def read_root(db: Session = Depends(get_db)):
+    villages_count = db.query(func.count(Village.id)).scalar() or 0
+    hospitals_count = len(hospital_directory.hospitals)
     return {
         "system": "SevaSetu Rural Healthcare Platform",
         "status": "Operational",
         "engine": "Clinical Rule-Based Triage Engine v1.2",
-        "mode": "Live Government Datasets",
-        "villages_indexed": len(MAHARASHTRA_VILLAGES),
-        "hospitals_indexed": len(hospital_directory.hospitals)
+        "mode": "Supabase PostgreSQL",
+        "villages_indexed": villages_count,
+        "hospitals_indexed": hospitals_count,
     }
 
+
 @app.get("/api/health")
-def health_check():
+def health_check(db: Session = Depends(get_db)):
+    villages_count = db.query(func.count(Village.id)).scalar() or 0
+    hospitals_count = len(hospital_directory.hospitals)
     return {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
         "database": "connected",
-        "villages_count": len(MAHARASHTRA_VILLAGES),
-        "hospitals_count": len(hospital_directory.hospitals)
+        "villages_count": villages_count,
+        "hospitals_count": hospitals_count,
     }
+
 
 # ----------------- Maharashtra Village Dataset & Search -----------------
 @app.get("/api/villages/search")
@@ -85,54 +84,76 @@ def search_villages(
     q: str = Query(..., min_length=1, description="Search query for village name, taluka, or district"),
     district: Optional[str] = Query(None, description="Filter by district"),
     taluka: Optional[str] = Query(None, description="Filter by taluka"),
-    limit: int = Query(25, ge=1, le=100)
+    limit: int = Query(25, ge=1, le=100),
+    db: Session = Depends(get_db),
 ):
     """
-    Fast search across authentic 44,810 Maharashtra villages.
-    Returns matching village names with their associated Taluka and District.
+    Fast search across authentic 44,810 Maharashtra villages stored in Supabase.
+    Returns matching village records with district/taluka info.
     """
-    query = q.strip().lower()
-    if not query:
+    query_str = q.strip()
+    if not query_str:
         return []
 
-    exact_or_prefix = []
-    substr_matches = []
+    db_query = db.query(Village)
 
-    for v in MAHARASHTRA_VILLAGES:
-        if district and v.get("district", "").lower() != district.lower():
-            continue
-        if taluka and v.get("taluka", "").lower() != taluka.lower():
-            continue
+    if district:
+        db_query = db_query.filter(func.lower(Village.district) == district.lower())
+    if taluka:
+        db_query = db_query.filter(func.lower(Village.taluka) == taluka.lower())
 
-        name_lower = v.get("name", "").lower()
-        taluka_lower = v.get("taluka", "").lower()
-        district_lower = v.get("district", "").lower()
+    # Prefix matches first, then substring — union via Python for ordering
+    prefix_results = (
+        db_query.filter(Village.name.ilike(f'{query_str}%'))
+        .limit(limit)
+        .all()
+    )
+    prefix_ids = {v.id for v in prefix_results}
 
-        if name_lower.startswith(query):
-            exact_or_prefix.append(v)
-        elif query in name_lower or query in taluka_lower or query in district_lower:
-            substr_matches.append(v)
+    substr_results = (
+        db_query.filter(
+            or_(
+                Village.name.ilike(f'%{query_str}%'),
+                Village.taluka.ilike(f'%{query_str}%'),
+                Village.district.ilike(f'%{query_str}%'),
+            ),
+            Village.id.notin_(prefix_ids),
+        )
+        .limit(limit)
+        .all()
+    )
 
-        if len(exact_or_prefix) >= limit:
-            break
+    combined = prefix_results + substr_results
+    return [
+        {
+            "id": v.id,
+            "name": v.name,
+            "district": v.district,
+            "taluka": v.taluka,
+            "districtCode": v.district_code,
+            "talukaCode": v.taluka_code,
+            "status": v.status,
+        }
+        for v in combined[:limit]
+    ]
 
-    results = exact_or_prefix + substr_matches
-    return results[:limit]
 
 @app.get("/api/districts")
-def list_districts():
-    """Returns unique list of Maharashtra districts from dataset"""
-    districts = sorted(list(set(v.get("district") for v in MAHARASHTRA_VILLAGES if v.get("district"))))
-    return districts
+def list_districts(db: Session = Depends(get_db)):
+    """Returns unique list of Maharashtra districts from Supabase villages table."""
+    rows = db.query(Village.district).distinct().order_by(Village.district).all()
+    return [r[0] for r in rows if r[0]]
+
 
 @app.get("/api/talukas")
-def list_talukas(district: Optional[str] = None):
-    """Returns talukas for a given district or all talukas"""
+def list_talukas(district: Optional[str] = None, db: Session = Depends(get_db)):
+    """Returns talukas for a given district (or all talukas) from Supabase."""
+    q = db.query(Village.taluka).distinct()
     if district:
-        talukas = sorted(list(set(v.get("taluka") for v in MAHARASHTRA_VILLAGES if v.get("district", "").lower() == district.lower() and v.get("taluka"))))
-    else:
-        talukas = sorted(list(set(v.get("taluka") for v in MAHARASHTRA_VILLAGES if v.get("taluka"))))
-    return talukas
+        q = q.filter(func.lower(Village.district) == district.lower())
+    rows = q.order_by(Village.taluka).all()
+    return [r[0] for r in rows if r[0]]
+
 
 # ----------------- Facilities & Government Hospital Directory -----------------
 @app.get("/api/facilities")
@@ -145,11 +166,11 @@ def get_facilities(
     category: Optional[str] = Query(None, description="Filter by category"),
     lat: Optional[float] = None,
     lng: Optional[float] = None,
-    limit: int = Query(40, ge=1, le=100)
+    limit: int = Query(40, ge=1, le=100),
 ):
     """
-    Returns authentic government & registered hospitals from hospital_directory.csv
-    filtered to the patient's selected village, district, taluka, with coordinate distance sorting.
+    Returns authentic government & registered hospitals from Supabase hospitals table
+    filtered by district/taluka/village, sorted by proximity.
     """
     results = hospital_directory.search(
         district=district,
@@ -159,28 +180,29 @@ def get_facilities(
         lat=lat,
         lng=lng,
         category=category,
-        limit=limit
+        limit=limit,
     )
-
     return {
         "district": district or "All Maharashtra",
         "taluka": taluka,
         "village": village,
         "total_count": len(results),
-        "facilities": results
+        "facilities": results,
     }
+
 
 @app.get("/api/hospitals/search")
 def search_hospitals_by_name(
     q: str = Query("", description="Search query for hospital name, district, or address"),
     district: Optional[str] = Query(None, description="Optional district filter"),
-    limit: int = Query(30, ge=1, le=100)
+    limit: int = Query(30, ge=1, le=100),
 ):
     """
-    Search authentic Maharashtra hospitals by name from hospital_directory.csv
-    for Hospital Login and selection.
+    Search hospitals by name from Supabase hospitals table.
+    Used for Hospital Login and selection autocomplete.
     """
     return hospital_directory.search_by_name(query=q, district=district, limit=limit)
+
 
 @app.get("/api/hospitals/{hospital_id}")
 def get_hospital_details(hospital_id: str):
@@ -188,6 +210,7 @@ def get_hospital_details(hospital_id: str):
     if not h:
         raise HTTPException(status_code=404, detail="Hospital not found in dataset")
     return h
+
 
 # ----------------- Patients -----------------
 @app.post("/api/patients", response_model=PatientResponse)
@@ -213,9 +236,11 @@ def create_patient(patient_in: PatientCreate, db: Session = Depends(get_db)):
     db.refresh(new_patient)
     return new_patient
 
+
 @app.get("/api/patients", response_model=List[PatientResponse])
 def list_patients(limit: int = 50, db: Session = Depends(get_db)):
     return db.query(Patient).order_by(desc(Patient.id)).limit(limit).all()
+
 
 # ----------------- Triage Engine & Evaluation -----------------
 @app.post("/api/triage/evaluate", response_model=TriageEvaluationResponse)
@@ -226,7 +251,6 @@ def evaluate_triage(req: TriageEvaluationRequest, db: Session = Depends(get_db))
     """
     triage_result = triage_engine.evaluate(req.vitals)
 
-    # Save to database
     record = TriageRecord(
         patient_id=req.patient_id,
         patient_name=req.patient_name,
@@ -257,7 +281,6 @@ def evaluate_triage(req: TriageEvaluationRequest, db: Session = Depends(get_db))
     db.commit()
     db.refresh(record)
 
-    # Return response including generated ID
     return {
         "id": record.id,
         "priority": triage_result["priority"],
@@ -268,22 +291,23 @@ def evaluate_triage(req: TriageEvaluationRequest, db: Session = Depends(get_db))
         "is_diagnosis": triage_result["is_diagnosis"],
         "disclaimer": triage_result["disclaimer"],
         "triggers": triage_result["triggers"],
-        "recommended_action": triage_result["recommended_action"]
+        "recommended_action": triage_result["recommended_action"],
     }
+
 
 @app.get("/api/triage/queue")
 def get_doctor_queue(
     priority: Optional[str] = None,
     village: Optional[str] = None,
     status: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Returns prioritized patient queue for Doctor verification.
     Ordered by priority (P1 first, then P2, then P3), then timestamp.
     """
     query = db.query(TriageRecord)
-    
+
     if priority and priority != "All":
         query = query.filter(TriageRecord.priority == priority)
     if village and village != "All":
@@ -300,7 +324,7 @@ def get_doctor_queue(
     )
 
     records = query.order_by(priority_order, desc(TriageRecord.created_at)).all()
-    
+
     return [
         {
             "id": r.id,
@@ -330,10 +354,11 @@ def get_doctor_queue(
             "prescription": r.prescription,
             "status": r.status,
             "source": r.source,
-            "created_at": r.created_at.isoformat() if r.created_at else None
+            "created_at": r.created_at.isoformat() if r.created_at else None,
         }
         for r in records
     ]
+
 
 @app.post("/api/triage/verify")
 def verify_triage_record(req: DoctorVerificationRequest, db: Session = Depends(get_db)):
@@ -359,18 +384,19 @@ def verify_triage_record(req: DoctorVerificationRequest, db: Session = Depends(g
         "success": True,
         "message": f"Triage record #{record.id} verified by {req.doctor_name}",
         "updated_priority": record.priority,
-        "status": record.status
+        "status": record.status,
     }
 
-# ----------------- Offline Sync (Dexie.js -> SQLite) -----------------
+
+# ----------------- Offline Sync (Dexie.js -> Supabase) -----------------
 @app.post("/api/sync/batch")
 def sync_batch_records(req: BatchSyncRequest, db: Session = Depends(get_db)):
     """
     Accepts offline triage records stored in ASHA worker's browser IndexedDB (Dexie.js).
-    Resolves conflicts and saves records into the central database.
+    Resolves conflicts and saves records into Supabase.
     """
     synced_ids = []
-    
+
     for item in req.records:
         record = TriageRecord(
             patient_name=item.patient_name,
@@ -393,10 +419,10 @@ def sync_batch_records(req: BatchSyncRequest, db: Session = Depends(get_db)):
             doctor_verified=False,
             status="Pending",
             source="ASHA_Offline",
-            created_at=item.recorded_at
+            created_at=item.recorded_at,
         )
         db.add(record)
-        
+
         # Credit ASHA Incentive
         incentive = AshaIncentive(
             asha_id=req.asha_id,
@@ -404,7 +430,7 @@ def sync_batch_records(req: BatchSyncRequest, db: Session = Depends(get_db)):
             activity_type="Rural Screening & Offline Sync",
             patient_name=item.patient_name,
             amount=50.0,
-            status="Approved"
+            status="Approved",
         )
         db.add(incentive)
         synced_ids.append(item.local_id)
@@ -416,8 +442,9 @@ def sync_batch_records(req: BatchSyncRequest, db: Session = Depends(get_db)):
         "synced_count": len(synced_ids),
         "synced_local_ids": synced_ids,
         "incentives_credited_inr": len(synced_ids) * 50.0,
-        "message": f"Successfully synchronized {len(synced_ids)} records to Server."
+        "message": f"Successfully synchronized {len(synced_ids)} records to Supabase.",
     }
+
 
 @app.get("/api/asha/incentives")
 def get_asha_incentives(asha_id: Optional[str] = None, db: Session = Depends(get_db)):
@@ -426,7 +453,7 @@ def get_asha_incentives(asha_id: Optional[str] = None, db: Session = Depends(get
         query = query.filter(AshaIncentive.asha_id == asha_id)
     incentives = query.order_by(desc(AshaIncentive.recorded_at)).all()
     total_inr = sum(i.amount for i in incentives)
-    
+
     return {
         "asha_id": asha_id or "ALL",
         "total_earned_inr": total_inr,
@@ -438,11 +465,12 @@ def get_asha_incentives(asha_id: Optional[str] = None, db: Session = Depends(get
                 "activity": i.activity_type,
                 "amount": i.amount,
                 "status": i.status,
-                "date": i.recorded_at.strftime("%d %b %Y, %I:%M %p") if i.recorded_at else None
+                "date": i.recorded_at.strftime("%d %b %Y, %I:%M %p") if i.recorded_at else None,
             }
             for i in incentives
-        ]
+        ],
     }
+
 
 # ----------------- Referrals -----------------
 @app.get("/api/referrals")
@@ -467,10 +495,11 @@ def get_referrals(priority: Optional[str] = None, status: Optional[str] = None, 
             "reason": r.reason,
             "transport_mode": r.transport_mode,
             "status": r.status,
-            "created_at": r.created_at.isoformat() if r.created_at else None
+            "created_at": r.created_at.isoformat() if r.created_at else None,
         }
         for r in referrals
     ]
+
 
 @app.post("/api/referrals")
 def create_referral(req: ReferralCreate, db: Session = Depends(get_db)):
@@ -484,7 +513,7 @@ def create_referral(req: ReferralCreate, db: Session = Depends(get_db)):
         urgency=req.urgency or "Immediate",
         reason=req.reason,
         transport_mode=req.transport_mode or "108 Emergency Ambulance",
-        status=req.status or "Pending"
+        status=req.status or "Pending",
     )
     db.add(ref)
     db.commit()
@@ -493,8 +522,9 @@ def create_referral(req: ReferralCreate, db: Session = Depends(get_db)):
         "success": True,
         "referral_id": ref.id,
         "status": ref.status,
-        "message": f"Referral created to {ref.target_facility} for {ref.patient_name}"
+        "message": f"Referral created to {ref.target_facility} for {ref.patient_name}",
     }
+
 
 @app.patch("/api/referrals/{referral_id}/status")
 def update_referral_status(referral_id: int, payload: dict, db: Session = Depends(get_db)):
@@ -508,13 +538,14 @@ def update_referral_status(referral_id: int, payload: dict, db: Session = Depend
         db.refresh(ref)
     return {"success": True, "id": ref.id, "new_status": ref.status}
 
+
 # ----------------- Appointments -----------------
 @app.get("/api/appointments", response_model=List[AppointmentResponse])
 def get_appointments(
     facility: Optional[str] = None,
     doctor: Optional[str] = None,
     status: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     query = db.query(Appointment)
     if facility and facility != "All":
@@ -523,8 +554,8 @@ def get_appointments(
         query = query.filter(Appointment.doctor_name.ilike(f"%{doctor}%"))
     if status and status != "All":
         query = query.filter(Appointment.status == status)
-    
     return query.order_by(desc(Appointment.created_at)).all()
+
 
 @app.post("/api/appointments", response_model=AppointmentResponse)
 def create_appointment(req: AppointmentCreate, db: Session = Depends(get_db)):
@@ -539,12 +570,13 @@ def create_appointment(req: AppointmentCreate, db: Session = Depends(get_db)):
         time_slot=req.time_slot,
         reason=req.reason or "OPD Consultation",
         priority=req.priority or "P3",
-        status=req.status or "Scheduled"
+        status=req.status or "Scheduled",
     )
     db.add(appt)
     db.commit()
     db.refresh(appt)
     return appt
+
 
 @app.patch("/api/appointments/{appointment_id}/status")
 def update_appointment_status(appointment_id: int, payload: AppointmentStatusUpdate, db: Session = Depends(get_db)):
@@ -556,6 +588,7 @@ def update_appointment_status(appointment_id: int, payload: AppointmentStatusUpd
     db.refresh(appt)
     return {"success": True, "id": appt.id, "status": appt.status}
 
+
 # ----------------- Inventory & Stock -----------------
 @app.get("/api/inventory")
 def get_inventory(facility: Optional[str] = None, db: Session = Depends(get_db)):
@@ -563,11 +596,11 @@ def get_inventory(facility: Optional[str] = None, db: Session = Depends(get_db))
     if facility and facility != "All":
         query = query.filter(Inventory.facility_name.ilike(f"%{facility}%"))
     items = query.all()
-    
+
     for item in items:
         item.is_low_stock = item.current_stock < item.min_threshold
     db.commit()
-    
+
     low_stock_count = sum(1 for item in items if item.is_low_stock)
 
     return {
@@ -583,11 +616,12 @@ def get_inventory(facility: Optional[str] = None, db: Session = Depends(get_db))
                 "min_threshold": item.min_threshold,
                 "unit": item.unit,
                 "is_low_stock": item.is_low_stock,
-                "last_updated": item.last_updated.isoformat() if item.last_updated else None
+                "last_updated": item.last_updated.isoformat() if item.last_updated else None,
             }
             for item in items
-        ]
+        ],
     }
+
 
 @app.patch("/api/inventory/{item_id}/stock")
 def update_stock(item_id: int, payload: InventoryUpdate, db: Session = Depends(get_db)):
@@ -599,6 +633,7 @@ def update_stock(item_id: int, payload: InventoryUpdate, db: Session = Depends(g
     item.last_updated = datetime.utcnow()
     db.commit()
     return {"success": True, "id": item.id, "current_stock": item.current_stock, "is_low_stock": item.is_low_stock}
+
 
 # ----------------- District Admin Analytics & Outbreak Heatmap -----------------
 @app.get("/api/analytics/overview")
@@ -622,9 +657,10 @@ def get_district_overview(db: Session = Depends(get_db)):
             "completed_referrals": completed_referrals,
             "low_stock_medicines": low_stock_medicines,
             "avg_triage_response_time_mins": 3.4,
-            "offline_sync_success_rate": "100%"
-        }
+            "offline_sync_success_rate": "100%",
+        },
     }
+
 
 @app.get("/api/analytics/outbreaks")
 def get_outbreak_heatmap(db: Session = Depends(get_db)):
@@ -638,11 +674,12 @@ def get_outbreak_heatmap(db: Session = Depends(get_db)):
                 "disease": c.disease_type,
                 "cases": c.active_cases,
                 "risk_level": c.risk_level,
-                "reported_date": c.reported_date.isoformat() if c.reported_date else None
+                "reported_date": c.reported_date.isoformat() if c.reported_date else None,
             }
             for c in clusters
         ]
     }
+
 
 # ----------------- Mock Services Endpoints -----------------
 @app.post("/api/mock/bhashini/translate")
@@ -652,17 +689,20 @@ def translate_bhashini(payload: dict):
     target_lang = payload.get("target_lang", "en")
     return BhashiniService.translate_text(text, source_lang, target_lang)
 
+
 @app.post("/api/mock/bhashini/asr")
 def asr_bhashini(payload: dict):
     duration = payload.get("duration", 2.5)
     lang = payload.get("language", "mr")
     return BhashiniService.process_voice_asr(duration, lang)
 
+
 @app.post("/api/mock/abdm/generate-abha")
 def generate_abha(payload: dict):
     name = payload.get("name", "Patient")
     phone = payload.get("phone", "9800000000")
     return AbdmFhirService.generate_abha_id(name, phone)
+
 
 @app.post("/api/mock/esanjeevani/create-session")
 def create_esanjeevani_session(payload: dict):

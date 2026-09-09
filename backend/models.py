@@ -2,6 +2,59 @@ from datetime import datetime
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text
 from .database import Base
 
+
+# ─────────────────────────────────────────────
+# Reference Data Tables (seeded from CSV/JSON)
+# ─────────────────────────────────────────────
+
+class Hospital(Base):
+    """
+    Stores all 4,807 authentic Maharashtra hospitals from hospital_directory.csv.
+    Seeded once via backend/migrate_data.py — never written to by the API.
+    """
+    __tablename__ = "hospitals"
+
+    id = Column(String(50), primary_key=True, index=True)        # e.g. "hosp-1"
+    name = Column(String(255), nullable=False, index=True)
+    category = Column(String(100), nullable=True)
+    care_type = Column(String(100), nullable=True)
+    address = Column(Text, nullable=True)
+    district = Column(String(100), nullable=True, index=True)
+    subdistrict = Column(String(100), nullable=True, index=True)
+    village = Column(String(100), nullable=True)
+    pincode = Column(String(20), nullable=True)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
+    specialties = Column(Text, nullable=True)
+    facilities = Column(Text, nullable=True)
+    emergency_services = Column(String(100), nullable=True)
+    ambulance = Column(String(50), nullable=True)
+    phone = Column(String(100), nullable=True)
+    doctors = Column(Integer, nullable=True)
+    beds = Column(Integer, nullable=True)
+    status = Column(String(50), nullable=True)
+
+
+class Village(Base):
+    """
+    Stores all 44,810 authentic Maharashtra villages from maharashtra_villages_website.json.
+    Seeded once via backend/migrate_data.py — never written to by the API.
+    """
+    __tablename__ = "villages"
+
+    id = Column(String(50), primary_key=True, index=True)        # e.g. "v-1"
+    name = Column(String(150), nullable=False, index=True)
+    district = Column(String(100), nullable=True, index=True)
+    taluka = Column(String(100), nullable=True, index=True)
+    district_code = Column(String(20), nullable=True)
+    taluka_code = Column(String(20), nullable=True)
+    status = Column(String(50), nullable=True)
+
+
+# ─────────────────────────────────────────────
+# Dynamic Application Data Tables
+# ─────────────────────────────────────────────
+
 class Patient(Base):
     __tablename__ = "patients"
 
@@ -18,6 +71,7 @@ class Patient(Base):
     preferred_language = Column(String(20), default="mr")  # mr, hi, en
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
 class TriageRecord(Base):
     __tablename__ = "triage_records"
 
@@ -30,7 +84,7 @@ class TriageRecord(Base):
     taluka = Column(String(100), nullable=True)
     district = Column(String(100), nullable=True)
     phone = Column(String(20), nullable=True)
-    
+
     # Vitals
     systolic_bp = Column(Float, nullable=True)
     diastolic_bp = Column(Float, nullable=True)
@@ -41,22 +95,23 @@ class TriageRecord(Base):
     symptoms = Column(Text, nullable=True)
     high_risk_maternal = Column(Boolean, default=False)
     maternal_note = Column(String(255), nullable=True)
-    
+
     # AI Triage outputs
     priority = Column(String(10), nullable=False)  # P1, P2, P3
     triage_reason = Column(Text, nullable=False)
     confidence_score = Column(Float, default=0.95)
     doctor_verification_required = Column(Boolean, default=True)
-    
+
     # Doctor review
     doctor_verified = Column(Boolean, default=False)
     doctor_name = Column(String(100), nullable=True)
     doctor_notes = Column(Text, nullable=True)
     prescription = Column(Text, nullable=True)
     status = Column(String(30), default="Pending")  # Pending, Verified, Referred, Completed
-    
+
     source = Column(String(30), default="Patient")  # Patient, ASHA_Offline, ASHA_Online
     created_at = Column(DateTime, default=datetime.utcnow)
+
 
 class Referral(Base):
     __tablename__ = "referrals"
@@ -73,6 +128,7 @@ class Referral(Base):
     transport_mode = Column(String(50), default="108 Emergency Ambulance")
     status = Column(String(30), default="Pending")  # Pending, Accepted, Patient Arrived, Completed, Follow-up
     created_at = Column(DateTime, default=datetime.utcnow)
+
 
 class Appointment(Base):
     __tablename__ = "appointments"
@@ -91,6 +147,7 @@ class Appointment(Base):
     status = Column(String(30), default="Scheduled")  # Scheduled, Waiting, In-Consultation, Completed, Cancelled
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
 class Inventory(Base):
     __tablename__ = "inventory"
 
@@ -104,6 +161,7 @@ class Inventory(Base):
     is_low_stock = Column(Boolean, default=False)
     last_updated = Column(DateTime, default=datetime.utcnow)
 
+
 class OutbreakCluster(Base):
     __tablename__ = "outbreak_clusters"
 
@@ -114,6 +172,7 @@ class OutbreakCluster(Base):
     active_cases = Column(Integer, default=1)
     risk_level = Column(String(20), default="Medium")  # Low, Medium, High
     reported_date = Column(DateTime, default=datetime.utcnow)
+
 
 class AshaIncentive(Base):
     __tablename__ = "asha_incentives"

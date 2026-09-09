@@ -1,7 +1,40 @@
-node_modules/
-.env
-.env.local
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
 dist/
 build/
-.DS_Store
 
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Database (SQLite — not used in production)
+*.db
+*.sqlite
+*.sqlite3
+
+# Large reference data files — these live in Supabase now
+hospital_directory.csv
+maharashtra_villages_website.json
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/build/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
