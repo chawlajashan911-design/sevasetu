@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
 class VitalsInput(BaseModel):
@@ -24,6 +24,8 @@ class PatientCreate(BaseModel):
     wadi: Optional[str] = None
     preferred_language: Optional[str] = "mr"
     abha_id: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 class PatientResponse(PatientCreate):
     id: int
@@ -41,6 +43,8 @@ class TriageEvaluationRequest(BaseModel):
     village: Optional[str] = None
     taluka: Optional[str] = None
     district: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
     vitals: VitalsInput
     source: Optional[str] = "Patient"
 
@@ -120,3 +124,38 @@ class BatchSyncRequest(BaseModel):
 class InventoryUpdate(BaseModel):
     id: int
     current_stock: int
+
+# Auth & Services Schemas
+class OtpRequest(BaseModel):
+    identifier: str  # 10-digit phone or 14-digit ABHA
+    role: Optional[str] = "patient"
+
+class OtpVerifyRequest(BaseModel):
+    session_id: str
+    otp: str
+    role: Optional[str] = "patient"
+    name: Optional[str] = None
+    village: Optional[str] = None
+    taluka: Optional[str] = None
+    district: Optional[str] = None
+
+class TeleconsultCreateRequest(BaseModel):
+    patient_name: str
+    priority: Optional[str] = "P1"
+    facility_name: Optional[str] = "Primary Healthcare Centre"
+    triage_id: Optional[int] = None
+    doctor_name: Optional[str] = "Duty Medical Officer"
+
+class BhashiniTranslateRequest(BaseModel):
+    text: str
+    source_lang: Optional[str] = "en"
+    target_lang: Optional[str] = "mr"
+
+class AbhaFieldTaskCreate(BaseModel):
+    patient_name: Optional[str] = "Citizen Patient"
+    phone: str
+    village: Optional[str] = "Kharpudi"
+    taluka: Optional[str] = "Khed"
+    district: Optional[str] = "Pune"
+    reason: Optional[str] = "Patient Needs ABHA Registration Field Assistance"
+

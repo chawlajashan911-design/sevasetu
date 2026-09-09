@@ -3,6 +3,12 @@ import os
 import math
 from typing import List, Dict, Optional, Any
 
+# Maharashtra geographical bounding box
+MH_LAT_MIN = 15.60
+MH_LAT_MAX = 22.05
+MH_LNG_MIN = 72.60
+MH_LNG_MAX = 80.95
+
 # Standard reference center coordinates for Maharashtra districts
 DISTRICT_CENTERS: Dict[str, tuple] = {
     'thane': (19.2183, 72.9781),
@@ -46,6 +52,10 @@ DISTRICT_CENTERS: Dict[str, tuple] = {
     'buldhana': (20.5292, 76.1843)
 }
 
+def is_within_maharashtra(lat: float, lng: float) -> bool:
+    """Checks if GPS coordinate pair falls within Maharashtra geographic boundaries"""
+    return (MH_LAT_MIN <= lat <= MH_LAT_MAX) and (MH_LNG_MIN <= lng <= MH_LNG_MAX)
+
 def clean_val(val: Any) -> Optional[str]:
     """Cleans 0, null, None, and empty placeholder values cleanly"""
     if val is None:
@@ -74,7 +84,7 @@ def parse_coords(coord_str: Optional[str]) -> Optional[Dict[str, float]]:
     return None
 
 def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculates great-circle distance in kilometers between two points"""
+    """Calculates great-circle distance in kilometers between two GPS points"""
     R = 6371.0
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
@@ -112,6 +122,9 @@ class HospitalDirectory:
                         continue
 
                     coords = parse_coords(r.get('Location_Coordinates'))
+                    # Reject corrupted coordinates from dataset (e.g. New Delhi/Patna coordinates mistakenly entered in MH records)
+                    if coords and not is_within_maharashtra(coords['lat'], coords['lng']):
+                        coords = None
                     
                     # Phones & emergency contacts
                     phone = (
@@ -124,7 +137,7 @@ class HospitalDirectory:
                     )
                     ambulance = clean_val(r.get('Ambulance_Phone_No'))
                     
-                    # Beds & Doctors (parse digits or None)
+                    # Beds & Doctors
                     beds_raw = clean_val(r.get('Total_Num_Beds'))
                     beds = int(beds_raw) if (beds_raw and beds_raw.isdigit() and int(beds_raw) > 0) else None
                     
@@ -143,29 +156,39 @@ class HospitalDirectory:
                     village = clean_val(r.get('Village')) or clean_val(r.get('Town')) or clean_val(r.get('Subtown'))
                     pincode = clean_val(r.get('Pincode'))
 
+                    # If facility coordinates missing from CSV, interpolate from district center
+                    inferred_coords = coords
+                    if not inferred_coords and district:
+                        dist_key = district.lower()
+                        for d_name, d_coords in DISTRICT_CENTERS.items():
+                            if d_name in dist_key or dist_key in d_name:
+                                inferred_coords = {'lat': d_coords[0], 'lng': d_coords[1]}
+                                break
+
                     loaded.append({
                         'id': f'hosp-{idx+1}',
                         'name': name,
                         'category': category or 'Healthcare Facility',
-                        'care_type': care_type or 'Hospital',
+                        'care_type': care_type or 'Primary Health Centre / Hospital',
                         'address': address or (f'{subdistrict}, {district}' if subdistrict else district or 'Maharashtra'),
                         'district': district or 'Maharashtra',
                         'subdistrict': subdistrict,
                         'village': village,
                         'pincode': pincode,
-                        'coordinates': coords,
+                        'coordinates': inferred_coords,
+                        'has_exact_gps': bool(coords),
                         'specialties': specialties,
                         'facilities': facilities,
                         'emergency_services': emergency,
-                        'ambulance': ambulance,
-                        'phone': phone,
+                        'ambulance': ambulance or "108 Emergency Ambulance",
+                        'phone': phone or "104 / 108",
                         'doctors': doctors,
                         'beds': beds,
                         'status': 'Operational (24x7)' if (emergency or 'Hospital' in (care_type or '')) else 'Open'
                     })
 
             self.hospitals = loaded
-            print(f"Loaded {len(self.hospitals)} authentic Maharashtra hospitals from hospital_directory.csv.")
+            print(f"Loaded {len(self.hospitals)} authentic Maharashtra healthcare facilities.")
         except Exception as e:
             print(f"Error loading hospital directory CSV: {e}")
 
@@ -179,30 +202,55 @@ class HospitalDirectory:
         lng: Optional[float] = None,
         category: Optional[str] = None,
         limit: int = 40
-    ) -> List[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """
-        Searches, filters by district/taluka/village, and sorts hospitals by proximity using coordinates.
+        Searches, filters, and computes real spatial Haversine proximity.
+        Includes boundary calculation if live GPS is outside Maharashtra.
         """
-        results = []
         district_clean = district.strip().lower() if district else None
         taluka_clean = taluka.strip().lower() if taluka else None
         query_clean = query.strip().lower() if query else None
 
-        # Determine reference coordinates for distance sorting
-        ref_lat = lat
-        ref_lng = lng
+        has_user_gps = (lat is not None and lng is not None)
+        user_lat = float(lat) if has_user_gps else None
+        user_lng = float(lng) if has_user_gps else None
 
-        if (ref_lat is None or ref_lng is None) and district_clean:
-            # Check district center coordinates
-            for d_name, d_coords in DISTRICT_CENTERS.items():
-                if d_name in district_clean or district_clean in d_name:
-                    ref_lat, ref_lng = d_coords
-                    break
+        is_outside = False
+        boundary_badge = "Maharashtra State Health Grid"
+        nearest_node_dist = 0.0
 
-        # If still no coordinates, default to Thane center (19.2183, 72.9781)
+        if has_user_gps:
+            is_outside = not is_within_maharashtra(user_lat, user_lng)
+
+        # Base reference coordinates if no live GPS supplied
+        ref_lat = user_lat
+        ref_lng = user_lng
+
         if ref_lat is None or ref_lng is None:
-            ref_lat, ref_lng = (19.2183, 72.9781)
+            if district_clean:
+                for d_name, d_coords in DISTRICT_CENTERS.items():
+                    if d_name in district_clean or district_clean in d_name:
+                        ref_lat, ref_lng = d_coords
+                        break
+            if ref_lat is None or ref_lng is None:
+                # Default to Pune center (18.5204, 73.8567)
+                ref_lat, ref_lng = (18.5204, 73.8567)
 
+        # Precompute nearest gateway facility if user is outside Maharashtra
+        if is_outside and has_user_gps:
+            min_dist = float('inf')
+            nearest_name = "Maharashtra Border Gateway PHC"
+            for h in self.hospitals:
+                c = h.get('coordinates')
+                if c and 'lat' in c and 'lng' in c:
+                    d = haversine(user_lat, user_lng, c['lat'], c['lng'])
+                    if d < min_dist:
+                        min_dist = d
+                        nearest_name = h['name']
+            nearest_node_dist = round(min_dist, 1)
+            boundary_badge = f"Nearest MH Grid Node: {nearest_node_dist:,.1f} km away ({nearest_name})"
+
+        results = []
         for h in self.hospitals:
             h_district = (h.get('district') or '').lower()
             h_subdistrict = (h.get('subdistrict') or '').lower()
@@ -212,9 +260,8 @@ class HospitalDirectory:
             h_fac = (h.get('facilities') or '').lower()
             h_addr = (h.get('address') or '').lower()
 
-            # District filtering if specified
-            if district_clean:
-                # Direct match or partial match on district name
+            # District filtering if explicitly requested and user didn't request global GPS proximity
+            if district_clean and not (is_outside and has_user_gps):
                 is_district_match = (
                     district_clean in h_district or 
                     h_district in district_clean or
@@ -223,7 +270,7 @@ class HospitalDirectory:
                 if not is_district_match:
                     continue
 
-            # Query search if provided
+            # Text query filtering
             if query_clean:
                 if not (
                     query_clean in h_name or
@@ -235,7 +282,7 @@ class HospitalDirectory:
                 ):
                     continue
 
-            # Category filter if provided
+            # Category filter
             if category and category != 'All':
                 cat_lower = category.lower()
                 h_care = (h.get('care_type') or '').lower()
@@ -243,46 +290,34 @@ class HospitalDirectory:
                 if not (cat_lower in h_care or cat_lower in h_cat or cat_lower in h_spec):
                     continue
 
-            # Calculate distance if hospital coordinates are available
             item = dict(h)
             coords = h.get('coordinates')
-            if coords and isinstance(coords, dict) and 'lat' in coords and 'lng' in coords:
-                h_lat = coords['lat']
-                h_lng = coords['lng']
-                dist = haversine(ref_lat, ref_lng, h_lat, h_lng)
+            if coords and 'lat' in coords and 'lng' in coords:
+                dist = haversine(ref_lat, ref_lng, coords['lat'], coords['lng'])
                 item['distance_km'] = dist
             else:
-                # If no direct coordinates on hospital, assign default proximity based on subdistrict match
-                if taluka_clean and (taluka_clean in h_subdistrict or taluka_clean in h_addr or taluka_clean in h_village):
-                    item['distance_km'] = 3.5
-                else:
-                    item['distance_km'] = 12.0
+                # Default to distance from Maharashtra state grid center
+                item['distance_km'] = haversine(ref_lat, ref_lng, 18.5204, 73.8567)
 
             results.append(item)
 
-        # Sort: hospitals with coordinates & lower distance first, then others
-        results.sort(key=lambda x: (x.get('distance_km') is None, x.get('distance_km', 999)))
+        # Sort strictly by real Haversine distance
+        results.sort(key=lambda x: x.get('distance_km', 9999))
 
-        # If district was queried but yielded < 5 results, add closest hospitals from other districts
-        if len(results) < 5 and district_clean:
-            additional = []
-            for h in self.hospitals:
-                if h['id'] not in [r['id'] for r in results]:
-                    item = dict(h)
-                    coords = h.get('coordinates')
-                    if coords and isinstance(coords, dict) and 'lat' in coords:
-                        dist = haversine(ref_lat, ref_lng, coords['lat'], coords['lng'])
-                        item['distance_km'] = dist
-                        additional.append(item)
-            additional.sort(key=lambda x: x.get('distance_km', 999))
-            results.extend(additional[:10])
-
-        return results[:limit]
+        return {
+            "district": district or ("Outside Maharashtra" if is_outside else "All Maharashtra"),
+            "taluka": taluka,
+            "village": village,
+            "user_coordinates": {"lat": user_lat, "lng": user_lng} if has_user_gps else None,
+            "is_outside_maharashtra": is_outside,
+            "boundary_badge": boundary_badge,
+            "nearest_border_distance_km": nearest_node_dist if is_outside else 0.0,
+            "total_count": len(results),
+            "facilities": results[:limit]
+        }
 
     def search_by_name(self, query: str, district: Optional[str] = None, limit: int = 30) -> List[Dict[str, Any]]:
-        """
-        Fast auto-complete search for hospital login by hospital name, district, or address.
-        """
+        """Fast autocomplete for login or selector"""
         q = (query or '').strip().lower()
         d = (district or '').strip().lower() if district else None
         

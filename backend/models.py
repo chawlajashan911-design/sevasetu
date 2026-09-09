@@ -16,6 +16,8 @@ class Patient(Base):
     district = Column(String(100), nullable=True)
     wadi = Column(String(100), nullable=True)
     preferred_language = Column(String(20), default="mr")  # mr, hi, en
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class TriageRecord(Base):
@@ -30,6 +32,8 @@ class TriageRecord(Base):
     taluka = Column(String(100), nullable=True)
     district = Column(String(100), nullable=True)
     phone = Column(String(20), nullable=True)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
     
     # Vitals
     systolic_bp = Column(Float, nullable=True)
@@ -126,3 +130,44 @@ class AshaIncentive(Base):
     amount = Column(Float, nullable=False)
     status = Column(String(30), default="Approved")  # Pending, Approved, Disbursed
     recorded_at = Column(DateTime, default=datetime.utcnow)
+
+class TeleconsultRoom(Base):
+    __tablename__ = "teleconsult_rooms"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(100), unique=True, index=True, nullable=False)
+    room_token = Column(String(100), nullable=False)
+    triage_id = Column(Integer, nullable=True)
+    patient_name = Column(String(100), nullable=False)
+    doctor_name = Column(String(100), default="Duty Medical Officer")
+    priority = Column(String(10), default="P1")
+    facility_name = Column(String(100), default="Healthcare Centre")
+    jitsi_url = Column(String(255), nullable=True)
+    webrtc_channel = Column(String(100), nullable=True)
+    status = Column(String(30), default="WAITING_FOR_DOCTOR")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class OtpSession(Base):
+    __tablename__ = "otp_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(100), unique=True, index=True, nullable=False)
+    identifier = Column(String(100), nullable=False)  # Phone number or ABHA address
+    otp_code = Column(String(10), nullable=False)
+    role = Column(String(30), default="patient")
+    is_verified = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class AbhaFieldTask(Base):
+    __tablename__ = "abha_field_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_name = Column(String(100), nullable=True)
+    phone = Column(String(20), nullable=False)
+    village = Column(String(100), default="Kharpudi")
+    taluka = Column(String(100), default="Khed")
+    district = Column(String(100), default="Pune")
+    reason = Column(String(255), default="Patient Needs ABHA Registration Field Assistance")
+    status = Column(String(30), default="Pending Assistance")  # Pending Assistance, Completed
+    created_at = Column(DateTime, default=datetime.utcnow)
+
