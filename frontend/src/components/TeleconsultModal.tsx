@@ -35,22 +35,22 @@ export const TeleconsultModal: React.FC<TeleconsultModalProps> = ({
   const [isVideoOn, setIsVideoOn] = useState(true);
   
   const initialGreeting = language === 'mr' 
-    ? 'नमस्कार, मी डॉ. आनंद कुलकर्णी बोलतोय. काय त्रास होतोय?' 
+    ? 'नमस्कार, मी वैद्यकीय अधिकारी बोलतोय. काय त्रास होतोय?' 
     : language === 'hi' 
-    ? 'नमस्कार, मैं डॉ. आनंद कुलकर्णी बोल रहा हूँ। क्या तकलीफ हो रही है?' 
-    : 'Hello, Dr. Anand Kulkarni here. How are you feeling today?';
+    ? 'नमस्कार, मैं चिकित्सा अधिकारी बोल रहा हूँ। क्या तकलीफ हो रही है?' 
+    : 'Hello, Medical Officer here. How are you feeling today?';
 
   const [messages, setMessages] = useState<{ sender: string; text: string; time: string }[]>([
     { 
       sender: 'System', 
       text: language === 'mr' 
-        ? 'टेलिकन्सल्टेशन सत्र सुरू झाले (खरपुडी PHC)' 
+        ? 'टेलिकन्सल्टेशन सत्र सुरू झाले' 
         : language === 'hi' 
-        ? 'टेलीपरामर्श सत्र प्रारंभ (खरपुडी PHC)' 
-        : 'Teleconsultation Session Connected (Kharpudi PHC Node)', 
+        ? 'टेलीपरामर्श सत्र प्रारंभ' 
+        : 'Teleconsultation Session Connected', 
       time: '12:00 PM' 
     },
-    { sender: 'Dr. Anand Kulkarni', text: initialGreeting, time: '12:01 PM' }
+    { sender: 'Medical Officer', text: initialGreeting, time: '12:01 PM' }
   ]);
   const [inputMsg, setInputMsg] = useState('');
   const [doctorNotes, setDoctorNotes] = useState('Advised Tab Paracetamol 500mg SOS, plenty of fluids, review if symptoms persist > 48h.');
@@ -154,7 +154,7 @@ export const TeleconsultModal: React.FC<TeleconsultModalProps> = ({
                       </div>
                       <h4 className="text-xl font-bold text-white">{patientRecord.patient_name}</h4>
                       <p className="text-sm text-teal-300 font-medium">
-                        {language === 'mr' ? 'खरपुडी उपकेंद्र जोडलेले' : language === 'hi' ? 'खरपुडी उपकेंद्र कनेक्टेड' : 'Connected from Kharpudi Node'}
+                        {language === 'mr' ? 'उपकेंद्र जोडलेले' : language === 'hi' ? 'उपकेंद्र कनेक्टेड' : 'Connected from Sub-Centre Node'}
                       </p>
                       <span className="inline-block mt-2 bg-emerald-500/20 text-emerald-300 text-xs px-2.5 py-0.5 rounded-full border border-emerald-500/30">
                         HD 720p Active
@@ -164,7 +164,7 @@ export const TeleconsultModal: React.FC<TeleconsultModalProps> = ({
                     {/* Doctor Mini View in corner */}
                     <div className="absolute top-4 right-4 w-32 h-24 bg-slate-800 rounded-xl border-2 border-teal-500 overflow-hidden shadow-lg flex flex-col items-center justify-center p-1">
                       <div className="text-xl">🩺</div>
-                      <span className="text-[10px] text-teal-200 font-bold mt-1">Dr. Anand Kulkarni</span>
+                      <span className="text-[10px] text-teal-200 font-bold mt-1">Medical Officer</span>
                     </div>
                   </div>
                 ) : (
@@ -204,9 +204,9 @@ export const TeleconsultModal: React.FC<TeleconsultModalProps> = ({
                   </div>
                   <div className="flex-1">
                     <p className="text-xs font-bold text-white">
-                      {language === 'mr' ? 'सुनिता ताई (आशा) व्हॉइस नोट' : language === 'hi' ? 'सुनीता ताई (आशा) वॉइस नोट' : 'Sunita Tai (ASHA) Voice Note'}
+                      {language === 'mr' ? 'आरोग्य सेविका (आशा) व्हॉइस नोट' : language === 'hi' ? 'आशा कार्यकर्ता वॉइस नोट' : 'Community Health Worker (ASHA) Voice Note'}
                     </p>
-                    <p className="text-[11px] text-slate-400">0:42 sec • Marathi description</p>
+                    <p className="text-[11px] text-slate-400">0:42 sec • Audio description</p>
                   </div>
                   <button className="px-3 py-1 bg-teal-600 text-white rounded-lg text-xs font-bold hover:bg-teal-700">Play</button>
                 </div>

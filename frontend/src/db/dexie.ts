@@ -18,7 +18,7 @@ export class RuralHealthcareDB extends Dexie {
   offlineQueue!: Table<OfflineSyncItem, number>;
 
   constructor() {
-    super('RuralHealthcareDB_Kharpudi');
+    super('SevaSetu_RuralHealthcareDB');
     this.version(1).stores({
       patients: '++id, phone, abha_id, name',
       triageRecords: 'local_id, priority, status, created_at, is_synced',

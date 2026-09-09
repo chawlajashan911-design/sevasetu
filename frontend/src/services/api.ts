@@ -1,7 +1,9 @@
-import { TriageRecord, Patient, Referral, InventoryItem, OutbreakCluster, Facility } from '../types';
+import { TriageRecord, Patient, Referral, Appointment, InventoryItem, OutbreakCluster, Facility, VillageRecord } from '../types';
 import { db, saveOfflineTriage, markAsSynced } from '../db/dexie';
 
-const API_BASE = '/api';
+// In production (Render Static Site), VITE_API_URL points to the backend Render URL.
+// In local dev, falls back to '/api' which is proxied to localhost:8000 via vite.config.ts.
+const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
 
 export const api = {
   // Check backend health
@@ -14,69 +16,71 @@ export const api = {
     }
   },
 
-  // Facilities
-  async getFacilities(lat?: number, lng?: number): Promise<Facility[]> {
+  // Facilities & Hospital Directory
+  async getFacilities(options?: {
+    district?: string;
+    taluka?: string;
+    village?: string;
+    query?: string;
+    category?: string;
+    lat?: number;
+    lng?: number;
+    limit?: number;
+  } | number, lngParam?: number): Promise<Facility[]> {
     try {
-      const query = lat && lng ? `?lat=${lat}&lng=${lng}` : '';
-      const res = await fetch(`${API_BASE}/facilities${query}`);
+      const params = new URLSearchParams();
+      if (typeof options === 'number') {
+        params.append('lat', options.toString());
+        if (lngParam) params.append('lng', lngParam.toString());
+      } else if (options && typeof options === 'object') {
+        if (options.district) params.append('district', options.district);
+        if (options.taluka) params.append('taluka', options.taluka);
+        if (options.village) params.append('village', options.village);
+        if (options.query) params.append('query', options.query);
+        if (options.category) params.append('category', options.category);
+        if (options.lat) params.append('lat', options.lat.toString());
+        if (options.lng) params.append('lng', options.lng.toString());
+        if (options.limit) params.append('limit', options.limit.toString());
+      }
+
+      const queryString = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${API_BASE}/facilities${queryString}`);
       if (!res.ok) throw new Error('Facilities fetch failed');
       const data = await res.json();
-      return data.facilities;
+      return data.facilities || [];
     } catch (e) {
-      console.warn('Using offline cached facilities');
-      return [
-        {
-          id: "fac-01",
-          name: "Kharpudi Sub-Centre (आरोग्य उपकेंद्र, खरपुडी)",
-          type: "Sub-Centre / Health & Wellness Centre",
-          distance_km: 0.8,
-          village: "Kharpudi",
-          phone: "+91 2133 222101",
-          doctor: "Sister Rekha Kamble (ANM)",
-          status: "Open",
-          coordinates: { lat: 18.9950, lng: 73.9520 }
-        },
-        {
-          id: "fac-02",
-          name: "Kharpudi Primary Health Centre (प्राथमिक आरोग्य केंद्र, खरपुडी)",
-          type: "PHC (24x7 Delivery & OPD)",
-          distance_km: 2.5,
-          village: "Kharpudi",
-          phone: "+91 2133 222102",
-          doctor: "Dr. Anand Kulkarni (Medical Officer)",
-          status: "Open (24x7 Emergency)",
-          coordinates: { lat: 19.0012, lng: 73.9605 }
-        },
-        {
-          id: "fac-03",
-          name: "Manchar Rural Hospital (ग्रामीण रुग्णालय, मंचर)",
-          type: "Rural Hospital (FRU - First Referral Unit)",
-          distance_km: 12.0,
-          village: "Manchar",
-          phone: "+91 2133 223344",
-          doctor: "Dr. Vaishali Ghadge (Civil Surgeon)",
-          status: "Open (Specialist Care)",
-          coordinates: { lat: 19.0118, lng: 73.9388 }
-        },
-        {
-          id: "fac-04",
-          name: "Pune District Hospital (जिल्हा रुग्णालय, औंध, पुणे)",
-          type: "District Multi-Specialty Hospital",
-          distance_km: 65.0,
-          village: "Aundh, Pune",
-          phone: "+91 20 2728 0100",
-          doctor: "Dr. Milind More (District Medical Superintendent)",
-          status: "Open (Tertiary Care)",
-          coordinates: { lat: 18.5590, lng: 73.8073 }
-        }
-      ];
+      console.warn('Facilities fetch error:', e);
+      return [];
+    }
+  },
+
+  // Search hospitals by name for login / selector
+  async searchHospitals(query: string, district?: string, limit: number = 30): Promise<Facility[]> {
+    try {
+      const params = new URLSearchParams({ q: query, limit: limit.toString() });
+      if (district) params.append('district', district);
+      const res = await fetch(`${API_BASE}/hospitals/search?${params.toString()}`);
+      if (!res.ok) throw new Error('Hospital search failed');
+      return await res.json();
+    } catch (e) {
+      console.warn('Hospital search error:', e);
+      return [];
+    }
+  },
+
+  async getHospitalById(id: string): Promise<Facility | null> {
+    try {
+      const res = await fetch(`${API_BASE}/hospitals/${encodeURIComponent(id)}`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
     }
   },
 
   // Triage Evaluation
   async evaluateTriage(payload: any, isOfflineMode: boolean = false): Promise<any> {
     if (isOfflineMode) {
-      // Local client-side evaluation matching the rule engine
       let priority = 'P3';
       let triage_label = 'P3 Routine';
       let triggers: string[] = [];
@@ -103,7 +107,7 @@ export const api = {
         patient_name: payload.patient_name,
         age: payload.age,
         gender: payload.gender,
-        village: payload.village || 'Kharpudi',
+        village: payload.village || '',
         phone: payload.phone,
         vitals: payload.vitals,
         priority: priority as any,
@@ -149,7 +153,6 @@ export const api = {
       if (!res.ok) throw new Error('Doctor queue fetch failed');
       return await res.json();
     } catch {
-      // Return records stored in Dexie as fallback
       const offlineRecords = await db.triageRecords.toArray();
       return offlineRecords;
     }
@@ -174,17 +177,17 @@ export const api = {
   },
 
   // Sync Offline Records Batch
-  async syncBatch(records: any[]): Promise<any> {
+  async syncBatch(records: any[], ashaId: string = 'ASHA_01', ashaName: string = 'ASHA Worker'): Promise<any> {
     const payload = {
-      asha_id: "ASHA_KHARPUDI_01",
-      asha_name: "Sunita Tai Shinde",
+      asha_id: ashaId,
+      asha_name: ashaName,
       records: records.map(r => ({
         local_id: r.local_id,
         patient_name: r.patient_name,
         age: r.age,
         gender: r.gender,
         phone: r.phone || "9800000000",
-        village: r.village || "Kharpudi",
+        village: r.village || "",
         vitals: r.vitals,
         priority: r.priority,
         triage_reason: r.triage_reason,
@@ -207,7 +210,7 @@ export const api = {
   },
 
   // ASHA Incentives
-  async getAshaIncentives(ashaId: string = 'ASHA_KHARPUDI_01'): Promise<any> {
+  async getAshaIncentives(ashaId: string = 'ASHA_01'): Promise<any> {
     try {
       const res = await fetch(`${API_BASE}/asha/incentives?asha_id=${ashaId}`);
       if (!res.ok) throw new Error('Incentives fetch failed');
@@ -215,19 +218,20 @@ export const api = {
     } catch {
       return {
         asha_id: ashaId,
-        asha_name: "Sunita Tai Shinde",
-        total_earned_month: 750,
-        pending_disbursal: 450,
-        disbursed_total: 300,
+        asha_name: "ASHA Worker",
+        total_earned_month: 0,
+        pending_disbursal: 0,
+        disbursed_total: 0,
         recent_activities: []
       };
     }
   },
 
   // Referrals
-  async getReferrals(): Promise<Referral[]> {
+  async getReferrals(status?: string): Promise<Referral[]> {
     try {
-      const res = await fetch(`${API_BASE}/referrals`);
+      const query = status && status !== 'All' ? `?status=${status}` : '';
+      const res = await fetch(`${API_BASE}/referrals${query}`);
       if (!res.ok) throw new Error('Referrals fetch failed');
       return await res.json();
     } catch {
@@ -245,17 +249,85 @@ export const api = {
     return await res.json();
   },
 
-  // Inventory
-  async getInventory(): Promise<{ facility: string; total_medicines: number; low_stock_count: number; items: InventoryItem[] }> {
+  async updateReferralStatus(referralId: number, status: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/referrals/${referralId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+    if (!res.ok) throw new Error('Referral status update failed');
+    return await res.json();
+  },
+
+  // Appointments
+  async getAppointments(facility?: string, doctor?: string, status?: string): Promise<Appointment[]> {
     try {
-      const res = await fetch(`${API_BASE}/inventory`);
+      const params = new URLSearchParams();
+      if (facility && facility !== 'All') params.append('facility', facility);
+      if (doctor && doctor !== 'All') params.append('doctor', doctor);
+      if (status && status !== 'All') params.append('status', status);
+
+      const res = await fetch(`${API_BASE}/appointments?${params.toString()}`);
+      if (!res.ok) throw new Error('Appointments fetch failed');
+      return await res.json();
+    } catch {
+      return [];
+    }
+  },
+
+  async createAppointment(payload: Appointment): Promise<Appointment> {
+    const res = await fetch(`${API_BASE}/appointments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error('Appointment creation failed');
+    return await res.json();
+  },
+
+  async updateAppointmentStatus(appointmentId: number, status: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/appointments/${appointmentId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+    if (!res.ok) throw new Error('Appointment status update failed');
+    return await res.json();
+  },
+
+  // Patients
+  async getPatients(limit: number = 50): Promise<Patient[]> {
+    try {
+      const res = await fetch(`${API_BASE}/patients?limit=${limit}`);
+      if (!res.ok) throw new Error('Patients fetch failed');
+      return await res.json();
+    } catch {
+      return [];
+    }
+  },
+
+  async createPatient(patient: Patient): Promise<Patient> {
+    const res = await fetch(`${API_BASE}/patients`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patient)
+    });
+    if (!res.ok) throw new Error('Patient registration failed');
+    return await res.json();
+  },
+
+  // Inventory
+  async getInventory(facility?: string): Promise<{ facility: string; total_medicines: number; low_stock_count: number; items: InventoryItem[] }> {
+    try {
+      const param = facility ? `?facility=${encodeURIComponent(facility)}` : '';
+      const res = await fetch(`${API_BASE}/inventory${param}`);
       if (!res.ok) throw new Error('Inventory fetch failed');
       return await res.json();
     } catch {
       return {
-        facility: "Kharpudi PHC",
-        total_medicines: 5,
-        low_stock_count: 2,
+        facility: facility || "Facility Inventory",
+        total_medicines: 0,
+        low_stock_count: 0,
         items: []
       };
     }
@@ -294,12 +366,80 @@ export const api = {
   },
 
   // Mock eSanjeevani Teleconsult Session
-  async createESanjeevaniSession(patientName: string, priority: string): Promise<any> {
+  async createESanjeevaniSession(patientName: string, priority: string, facilityName?: string): Promise<any> {
     const res = await fetch(`${API_BASE}/mock/esanjeevani/create-session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ patient_name: patientName, priority })
+      body: JSON.stringify({ patient_name: patientName, priority, facility_name: facilityName })
     });
     return await res.json();
+  },
+
+  // Maharashtra Village Search (44,810 authentic villages)
+  async searchVillages(query: string, district?: string, taluka?: string, limit: number = 25): Promise<VillageRecord[]> {
+    const q = query.trim();
+    if (!q) return [];
+    try {
+      const params = new URLSearchParams({ q, limit: limit.toString() });
+      if (district) params.append('district', district);
+      if (taluka) params.append('taluka', taluka);
+
+      const res = await fetch(`${API_BASE}/villages/search?${params.toString()}`);
+      if (res.ok) {
+        return await res.json();
+      }
+      throw new Error('API search failed');
+    } catch (err) {
+      console.warn('Falling back to local maharashtra_villages_website.json dataset search');
+      try {
+        if (!cachedLocalVillages) {
+          const fileRes = await fetch('/maharashtra_villages_website.json');
+          if (fileRes.ok) {
+            cachedLocalVillages = await fileRes.json();
+          }
+        }
+        if (cachedLocalVillages) {
+          const qLower = q.toLowerCase();
+          const matches: VillageRecord[] = [];
+          for (const v of cachedLocalVillages) {
+            if (district && v.district.toLowerCase() !== district.toLowerCase()) continue;
+            if (taluka && v.taluka.toLowerCase() !== taluka.toLowerCase()) continue;
+            if (
+              v.name.toLowerCase().includes(qLower) ||
+              v.taluka.toLowerCase().includes(qLower) ||
+              v.district.toLowerCase().includes(qLower)
+            ) {
+              matches.push(v);
+              if (matches.length >= limit) break;
+            }
+          }
+          return matches;
+        }
+      } catch (fileErr) {
+        console.error('Local village dataset search error:', fileErr);
+      }
+      return [];
+    }
+  },
+
+  async getDistricts(): Promise<string[]> {
+    try {
+      const res = await fetch(`${API_BASE}/districts`);
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn('Failed to fetch districts');
+    }
+    return [];
+  },
+
+  async getTalukas(district?: string): Promise<string[]> {
+    try {
+      const param = district ? `?district=${encodeURIComponent(district)}` : '';
+      const res = await fetch(`${API_BASE}/talukas${param}`);
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn('Failed to fetch talukas');
+    }
+    return [];
   }
 };

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Language, TriageRecord, AshaIncentiveActivity } from '../types';
+import { Language, TriageRecord, AshaIncentiveActivity, Patient, Referral } from '../types';
 import { translations } from '../i18n/translations';
 import { api } from '../services/api';
 import { db, getPendingSyncCount } from '../db/dexie';
@@ -21,7 +21,12 @@ import {
   Coins, 
   Check, 
   Clock,
-  UserCheck
+  UserCheck,
+  Users,
+  Send,
+  AlertOctagon,
+  Calendar,
+  CheckCircle2
 } from 'lucide-react';
 
 interface AshaPortalProps {
@@ -42,13 +47,16 @@ export const AshaPortal: React.FC<AshaPortalProps> = ({
   const t = translations[language];
   const { isListening, transcript, startListening, stopListening } = useSpeech(language);
 
+  // Active view tab
+  const [activeTab, setActiveTab] = useState<'screening' | 'village_patients' | 'risk_overview' | 'referrals' | 'followups' | 'incentives'>('screening');
+
   // Form State for ASHA Screening
   const [patientName, setPatientName] = useState('');
   const [age, setAge] = useState<number>(30);
   const [gender, setGender] = useState('Female');
   const [phone, setPhone] = useState('');
-  const [village, setVillage] = useState('Kharpudi');
-  const [wadi, setWadi] = useState('Wadarwadi');
+  const [village, setVillage] = useState('');
+  const [wadi, setWadi] = useState('Main Area');
   
   // Vitals
   const [systolicBp, setSystolicBp] = useState('130');
@@ -60,14 +68,10 @@ export const AshaPortal: React.FC<AshaPortalProps> = ({
   const [isMaternal, setIsMaternal] = useState(false);
   const [maternalNote, setMaternalNote] = useState('');
 
-  // Referral Modal / Form State
-  const [referralPatient, setReferralPatient] = useState('');
-  const [referralTarget, setReferralTarget] = useState('Kharpudi PHC');
-  const [referralReason, setReferralReason] = useState('');
-  const [referralPriority, setReferralPriority] = useState<'P1' | 'P2' | 'P3'>('P1');
-
-  // Offline Records and Incentives
+  // Data lists
   const [offlineRecords, setOfflineRecords] = useState<TriageRecord[]>([]);
+  const [villagePatients, setVillagePatients] = useState<Patient[]>([]);
+  const [referrals, setReferrals] = useState<Referral[]>([]);
   const [incentives, setIncentives] = useState<any>({
     total_earned_month: 950,
     pending_disbursal: 450,
@@ -76,6 +80,9 @@ export const AshaPortal: React.FC<AshaPortalProps> = ({
   });
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
 
+  // Follow-up home visit tasks state
+  const [completedFollowups, setCompletedFollowups] = useState<number[]>([1]);
+
   // Update symptoms from voice
   useEffect(() => {
     if (transcript) {
@@ -83,13 +90,23 @@ export const AshaPortal: React.FC<AshaPortalProps> = ({
     }
   }, [transcript]);
 
-  // Load offline records from Dexie and incentives from API
+  // Load records from Dexie and API
   const refreshRecords = async () => {
     const records = await db.triageRecords.toArray();
     setOfflineRecords(records);
     const count = await getPendingSyncCount();
     setPendingSyncCount(count);
-    api.getAshaIncentives().then(setIncentives);
+    
+    try {
+      const pats = await api.getPatients();
+      setVillagePatients(pats);
+      const refs = await api.getReferrals();
+      setReferrals(refs);
+      const inc = await api.getAshaIncentives();
+      setIncentives(inc);
+    } catch (e) {
+      console.warn('ASHA portal data load:', e);
+    }
   };
 
   useEffect(() => {
@@ -100,12 +117,7 @@ export const AshaPortal: React.FC<AshaPortalProps> = ({
   const handleSaveScreening = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!patientName || !phone) {
-      const alertMsg = language === 'mr' 
-        ? "कृपया रुग्णाचे नाव आणि फोन नंबर भरा." 
-        : language === 'hi' 
-        ? "कृपया मरीज का नाम और फोन नंबर भरें।" 
-        : "Please enter Patient Name and Phone Number.";
-      alert(alertMsg);
+      alert("Please enter Patient Name and Phone Number.");
       return;
     }
 
@@ -131,522 +143,479 @@ export const AshaPortal: React.FC<AshaPortalProps> = ({
 
       const result = await api.evaluateTriage(payload, isOffline);
 
-      // Trigger confetti celebration on successful save
       confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
 
       const savedMsg = isOffline
-        ? (language === 'mr' 
-            ? `[ऑफलाइन सेव्ह झाले] तपासणी स्थानिक नोंदवहीत सेव्ह झाली. निकाल: ${result.priority} (${result.triage_label}). इंटरनेट सुरू झाल्यावर सिंक करा.`
-            : language === 'hi'
-            ? `[ऑफलाइन सुरक्षित] जांच स्थानीय रजिस्टर में सुरक्षित हुई। परिणाम: ${result.priority} (${result.triage_label})। इंटरनेट आने पर सिंक करें।`
-            : `[Saved Offline] Screening saved locally in Dexie. Result: ${result.priority} (${result.triage_label}). Sync to server when online.`)
-        : (language === 'mr'
-            ? `[सर्व्हरवर सेव्ह झाले] तपासणी यशस्वी! AI निकाल: ${result.priority} (${result.triage_label})`
-            : language === 'hi'
-            ? `[सर्वर पर सुरक्षित] जांच सफल! AI परिणाम: ${result.priority} (${result.triage_label})`
-            : `[Saved to Server] Screening successful! AI Triage Result: ${result.priority} (${result.triage_label})`);
+        ? `[Saved Offline] Record saved locally in Dexie database. Priority: ${result.priority} (${result.triage_label}). Sync when internet is restored.`
+        : `[Saved to Server] Screening registered successfully! AI Priority: ${result.priority} (${result.triage_label}).`;
 
       alert(savedMsg);
 
-      // Reset form
+      // Reset Form
       setPatientName('');
       setPhone('');
       setSymptoms('');
       setIsMaternal(false);
-
-      await refreshRecords();
+      setMaternalNote('');
+      refreshRecords();
     } catch (err: any) {
-      alert("Error: " + err.message);
+      alert("Screening Error: " + err.message);
     }
   };
 
-  // Sync Offline Records Now
-  const handleSyncNow = async () => {
-    if (isOffline) {
-      const offAlert = language === 'mr'
-        ? "इंटरनेट बंद आहे. कृपया सिंक करण्यासाठी वरील स्विच ऑन करा."
-        : language === 'hi'
-        ? "इंटरनेट बंद है। कृपया सिंक करने के लिए ऑनलाइन मोड चालू करें।"
-        : "System is in Offline Mode. Switch to Online Mode to synchronize.";
-      alert(offAlert);
+  // 1-Click Batch Synchronization
+  const handleBatchSync = async () => {
+    const unsynced = offlineRecords.filter(r => !r.is_synced);
+    if (unsynced.length === 0) {
+      alert("All records are already synchronized!");
       return;
     }
 
-    const startSyncMsg = language === 'mr'
-      ? "सिंक सुरू आहे (सर्व नोंदी मुख्य सर्व्हरला पाठवत आहे)..."
-      : language === 'hi'
-      ? "सिंक जारी है (सभी रिकॉर्ड मुख्य सर्वर को भेजे जा रहे हैं)..."
-      : "Synchronizing offline records with central PHC server...";
-    setSyncStatus(startSyncMsg);
-
+    setSyncStatus('syncing');
     try {
-      const pendingItems = await db.offlineQueue.where('status').equals('PENDING').toArray();
-      if (pendingItems.length === 0) {
-        const noPendingMsg = language === 'mr'
-          ? "सर्व नोंदी आधीच सिंक झालेल्या आहेत."
-          : language === 'hi'
-          ? "सभी रिकॉर्ड पहले से सिंक हैं।"
-          : "All records are already synchronized.";
-        setSyncStatus(noPendingMsg);
-        setTimeout(() => setSyncStatus(null), 3000);
-        return;
-      }
-
-      const recordsToSync = pendingItems.map(item => item.payload);
-      const res = await api.syncBatch(recordsToSync);
-
-      confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-
-      const syncDoneMsg = language === 'mr'
-        ? `यशस्वी! ${res.synced_count} नोंदी सर्व्हरवर सिंक झाल्या. मानधन जमा: ₹${res.incentives_credited_inr}`
-        : language === 'hi'
-        ? `सफल! ${res.synced_count} रिकॉर्ड सर्वर पर सिंक हुए। प्रोत्साहन राशि: ₹${res.incentives_credited_inr}`
-        : `Success! Synchronized ${res.synced_count} records to server. Incentive credited: ₹${res.incentives_credited_inr}`;
-      setSyncStatus(syncDoneMsg);
-
-      await refreshRecords();
-      setTimeout(() => setSyncStatus(null), 5000);
-    } catch (err: any) {
-      setSyncStatus("Sync error: " + err.message);
+      const res = await api.syncBatch(unsynced);
+      confetti({ particleCount: 100, spread: 80, origin: { y: 0.6 } });
+      setSyncStatus('success');
+      alert(`Synchronized ${res.synced_count} records to server! ₹${res.incentives_credited_inr} incentives credited.`);
+      refreshRecords();
+    } catch (e: any) {
+      setSyncStatus('error');
+      alert("Sync failed: " + e.message);
     }
   };
 
-  // Create Referral
-  const handleCreateReferral = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!referralPatient) {
-      alert(language === 'mr' ? "कृपया रुग्णाचे नाव टाका." : language === 'hi' ? "कृपया मरीज का नाम भरें।" : "Please enter patient name.");
-      return;
-    }
-
-    await api.createReferral({
-      patient_name: referralPatient,
-      age: 28,
-      priority: referralPriority,
-      source_facility: "Kharpudi Sub-Centre",
-      target_facility: referralTarget,
-      urgency: referralPriority === 'P1' ? 'Immediate' : 'Routine',
-      reason: referralReason || "Referred for specialist medical examination",
-      transport_mode: referralPriority === 'P1' ? '108 Ambulance' : 'Transport Van / Auto'
-    });
-
-    const refAlert = language === 'mr'
-      ? `रेफरल नोंदवले गेले: ${referralPatient} -> ${referralTarget}`
-      : language === 'hi'
-      ? `रेफरल दर्ज हुआ: ${referralPatient} -> ${referralTarget}`
-      : `Referral submitted: ${referralPatient} -> ${referralTarget}`;
-    alert(refAlert);
-    setReferralPatient('');
-    setReferralReason('');
-  };
+  const p1Count = offlineRecords.filter(r => r.priority === 'P1').length;
+  const p2Count = offlineRecords.filter(r => r.priority === 'P2').length;
+  const p3Count = offlineRecords.filter(r => r.priority === 'P3').length;
 
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
-      {/* Top Banner with ASHA Profile & Sync Action */}
-      <div className="bg-gradient-to-r from-purple-800 via-indigo-900 to-slate-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl relative overflow-hidden">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* ASHA Header Banner */}
+      <div className="bg-gradient-to-r from-purple-900 via-fuchsia-900 to-slate-900 text-white rounded-3xl p-6 sm:p-8 shadow-xl">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center space-x-4">
             <div className="w-14 h-14 rounded-2xl bg-purple-600 border-2 border-purple-400 flex items-center justify-center text-3xl shadow-lg">
               👩‍⚕️
             </div>
             <div>
               <span className="bg-purple-500/30 text-purple-200 text-xs font-black uppercase px-2.5 py-0.5 rounded-full border border-purple-400/40">
-                {language === 'mr' ? 'आशा कार्यकर्ता डिजिटल डेस्क' : language === 'hi' ? 'आशा कार्यकर्ता डिजिटल डेस्क' : 'ASHA FIELD DESK'}
+                COMMUNITY HEALTH WORKER & ASHA PORTAL
               </span>
               <h2 className="text-xl sm:text-3xl font-black mt-1">
-                {t.asha_name}
+                Community Health Mobilizer Desk
               </h2>
-              <p className="text-xs text-purple-300 font-medium">
-                {t.asha_area}
+              <p className="text-xs text-purple-200/80 font-medium">
+                Field Health Circle • Offline-First Dexie.js Field Register
               </p>
             </div>
           </div>
 
-          {/* Sync Button & Status */}
-          <div className="flex items-center space-x-3 bg-white/10 backdrop-blur-md p-2 rounded-2xl border border-white/20">
-            <div className="px-3">
-              <span className="text-[10px] text-purple-200 uppercase font-bold block">{t.pending_sync}:</span>
-              <p className="text-xl font-black text-amber-300 font-mono">
-                {pendingSyncCount} {language === 'mr' ? 'नोंदी' : language === 'hi' ? 'रिकॉर्ड' : 'Records'}
-              </p>
-            </div>
-
+          <div className="flex items-center space-x-2">
             <button
-              onClick={handleSyncNow}
+              onClick={handleBatchSync}
               disabled={pendingSyncCount === 0}
-              className={`flex items-center space-x-2 px-5 py-3 rounded-xl font-extrabold text-xs shadow-md transition-all ${
+              className={`flex items-center space-x-2 px-4 py-2.5 rounded-2xl font-black text-xs shadow-lg transition-all ${
                 pendingSyncCount > 0
-                  ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 active:scale-95 animate-pulse'
-                  : 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                  ? 'bg-amber-400 text-slate-950 hover:bg-amber-300 animate-pulse'
+                  : 'bg-white/10 text-white/60 cursor-not-allowed'
               }`}
             >
-              <RefreshCw className={`w-4 h-4 ${pendingSyncCount > 0 ? 'animate-spin' : ''}`} />
-              <span>{t.sync_now}</span>
+              <RefreshCw className={`w-4 h-4 ${syncStatus === 'syncing' ? 'animate-spin' : ''}`} />
+              <span>{pendingSyncCount > 0 ? `Sync ${pendingSyncCount} Records` : 'All Synced'}</span>
             </button>
           </div>
         </div>
-
-        {syncStatus && (
-          <div className="mt-4 p-3 bg-emerald-500/20 border border-emerald-400/50 rounded-xl text-emerald-200 text-xs font-bold flex items-center space-x-2 animate-fadeIn">
-            <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-            <span>{syncStatus}</span>
-          </div>
-        )}
       </div>
 
-      {/* Main Grid: Form & Offline Records + Incentive Tracker */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left 2 Cols: Screening Form */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
-              <div className="flex items-center space-x-2">
-                <PlusCircle className="w-5 h-5 text-purple-600" />
-                <h3 className="text-lg font-black text-slate-900">{t.record_screening}</h3>
-              </div>
+      {/* Navigation Sub-Tabs */}
+      <div className="flex items-center space-x-2 overflow-x-auto pb-2 no-scrollbar border-b border-slate-200">
+        {[
+          { id: 'screening', label: "1. 📝 Field Screening Form", count: undefined },
+          { id: 'village_patients', label: "2. 👥 Village Patients", count: villagePatients.length },
+          { id: 'risk_overview', label: "3. 📊 Risk-Level Overview", count: p1Count },
+          { id: 'referrals', label: "4. 🚀 Pending Referrals", count: referrals.length },
+          { id: 'followups', label: "5. 🏠 Home Visit Follow-ups", count: 3 },
+          { id: 'incentives', label: "6. 💰 NHM Incentive Ledger", count: undefined }
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as any)}
+            className={`flex items-center space-x-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all ${
+              activeTab === tab.id
+                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/20'
+                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <span>{tab.label}</span>
+            {tab.count !== undefined && (
+              <span className={`text-[10px] font-black px-1.5 py-0.2 rounded-full ${
+                activeTab === tab.id ? 'bg-white text-purple-900' : 'bg-slate-200 text-slate-800'
+              }`}>
+                {tab.count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
 
-              {/* Mode indicator */}
-              <div className="flex items-center space-x-2">
-                {isOffline ? (
-                  <span className="bg-amber-100 text-amber-900 border border-amber-300 text-xs font-extrabold px-3 py-1 rounded-full flex items-center space-x-1">
-                    <WifiOff className="w-3.5 h-3.5 text-amber-600" />
-                    <span>{language === 'mr' ? 'स्थानिक मेमरीमध्ये सेव्ह होईल' : language === 'hi' ? 'स्थानीय मेमोरी में सुरक्षित होगा' : 'Local Offline Storage'}</span>
-                  </span>
-                ) : (
-                  <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-extrabold px-3 py-1 rounded-full flex items-center space-x-1">
-                    <Wifi className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>{language === 'mr' ? 'सर्व्हर कनेक्टेड' : language === 'hi' ? 'सर्वर कनेक्टेड' : 'Central Server Connected'}</span>
-                  </span>
-                )}
+      {/* ---------------- 1. FIELD SCREENING FORM TAB ---------------- */}
+      {activeTab === 'screening' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-200 space-y-6">
+            <div className="border-b border-slate-100 pb-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-xl font-black text-slate-900">Field Patient Health Screening</h3>
+                <p className="text-xs text-slate-500 font-medium">
+                  Works 100% offline in remote hamlets using Dexie.js IndexedDB
+                </p>
               </div>
+              <span className={`text-xs font-extrabold px-3 py-1 rounded-xl ${
+                isOffline ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'
+              }`}>
+                {isOffline ? 'Offline Mode' : 'Online Mode'}
+              </span>
             </div>
 
-            <form onSubmit={handleSaveScreening} className="space-y-4">
-              {/* Patient Basic Info */}
+            <form onSubmit={handleSaveScreening} className="space-y-4 text-xs font-bold">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">{t.name} *</label>
+                <div className="sm:col-span-2">
+                  <label className="text-slate-700 block mb-1">Patient Full Name *</label>
                   <input
                     type="text"
                     required
                     value={patientName}
                     onChange={(e) => setPatientName(e.target.value)}
-                    className="w-full p-3 rounded-xl border border-slate-300 text-xs font-semibold focus:ring-2 focus:ring-purple-500 outline-none"
-                    placeholder={language === 'mr' ? 'उदा. मंदाकिनी थोरात' : language === 'hi' ? 'उदा. मंदाकिनी थोरात' : 'e.g. Mandakini Thorat'}
+                    className="w-full p-3 bg-slate-50 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-purple-500 outline-none"
+                    placeholder="e.g. Maruti Baban Shinde"
                   />
                 </div>
-
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">{t.age} & {t.gender} *</label>
-                  <div className="flex space-x-2">
-                    <input
-                      type="number"
-                      value={age}
-                      onChange={(e) => setAge(parseInt(e.target.value) || 0)}
-                      className="w-20 p-3 rounded-xl border border-slate-300 text-xs font-semibold focus:ring-2 focus:ring-purple-500 outline-none text-center"
-                      placeholder="वय"
-                    />
-                    <select
-                      value={gender}
-                      onChange={(e) => setGender(e.target.value)}
-                      className="flex-1 p-3 rounded-xl border border-slate-300 text-xs font-semibold focus:ring-2 focus:ring-purple-500 outline-none"
-                    >
-                      <option value="Female">{t.female}</option>
-                      <option value="Male">{t.male}</option>
-                      <option value="Other">{t.other}</option>
-                    </select>
-                  </div>
+                  <label className="text-slate-700 block mb-1">Age *</label>
+                  <input
+                    type="number"
+                    required
+                    value={age}
+                    onChange={(e) => setAge(parseInt(e.target.value) || 0)}
+                    className="w-full p-3 bg-slate-50 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-purple-500 outline-none"
+                  />
                 </div>
+              </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">{t.phone} *</label>
+                  <label className="text-slate-700 block mb-1">Gender</label>
+                  <select
+                    value={gender}
+                    onChange={(e) => setGender(e.target.value)}
+                    className="w-full p-3 bg-slate-50 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-purple-500 outline-none"
+                  >
+                    <option value="Female">Female</option>
+                    <option value="Male">Male</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-slate-700 block mb-1">Mobile Number *</label>
                   <input
                     type="tel"
                     required
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    className="w-full p-3 rounded-xl border border-slate-300 text-xs font-semibold focus:ring-2 focus:ring-purple-500 outline-none"
-                    placeholder="9822XXXXXX"
+                    className="w-full p-3 bg-slate-50 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-purple-500 outline-none"
+                    placeholder="9422XXXXXX"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-700 block mb-1">Village / Hamlet</label>
+                  <input
+                    type="text"
+                    value={village}
+                    onChange={(e) => setVillage(e.target.value)}
+                    className="w-full p-3 bg-slate-50 rounded-xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-purple-500 outline-none"
                   />
                 </div>
               </div>
 
-              {/* Vitals Row */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1">{t.bp_sys}</label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                  <label className="text-[11px] text-slate-500 block mb-1">Systolic BP</label>
                   <input
                     type="number"
                     value={systolicBp}
                     onChange={(e) => setSystolicBp(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-300 text-sm font-bold text-center"
+                    className="w-full p-2 bg-white rounded-lg border border-slate-300 text-sm font-bold text-center"
                     placeholder="120"
                   />
                 </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1">{t.bp_dia}</label>
-                  <input
-                    type="number"
-                    value={diastolicBp}
-                    onChange={(e) => setDiastolicBp(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-300 text-sm font-bold text-center"
-                    placeholder="80"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1">{t.spo2}</label>
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                  <label className="text-[11px] text-slate-500 block mb-1">SpO2 %</label>
                   <input
                     type="number"
                     value={spo2}
                     onChange={(e) => setSpo2(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-300 text-sm font-bold text-center"
+                    className="w-full p-2 bg-white rounded-lg border border-slate-300 text-sm font-bold text-center"
                     placeholder="98"
                   />
                 </div>
-                <div>
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1">{t.temp}</label>
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                  <label className="text-[11px] text-slate-500 block mb-1">Temp (°F)</label>
                   <input
                     type="number"
                     step="0.1"
                     value={temperature}
                     onChange={(e) => setTemperature(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-300 text-sm font-bold text-center"
+                    className="w-full p-2 bg-white rounded-lg border border-slate-300 text-sm font-bold text-center"
                     placeholder="98.6"
+                  />
+                </div>
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                  <label className="text-[11px] text-slate-500 block mb-1">Duration (Days)</label>
+                  <input
+                    type="number"
+                    value={durationDays}
+                    onChange={(e) => setDurationDays(parseInt(e.target.value) || 1)}
+                    className="w-full p-2 bg-white rounded-lg border border-slate-300 text-sm font-bold text-center"
+                    placeholder="1"
                   />
                 </div>
               </div>
 
-              {/* High Risk Maternal Alert */}
-              <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl">
-                <label className="flex items-center space-x-3 cursor-pointer">
+              {/* Maternal Risk Toggle */}
+              <div className="p-3 bg-rose-50 rounded-xl border border-rose-200">
+                <label className="flex items-center space-x-2 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={isMaternal}
                     onChange={(e) => setIsMaternal(e.target.checked)}
-                    className="w-5 h-5 rounded text-purple-600 focus:ring-purple-500"
+                    className="w-5 h-5 rounded text-rose-600 focus:ring-rose-500"
                   />
-                  <span className="text-xs font-bold text-purple-950">
-                    {language === 'mr' 
-                      ? 'गरोदर माता तपासणी (Antenatal High-Risk Check) — ₹३०० प्रोत्साहन भत्ता' 
-                      : language === 'hi' 
-                      ? 'गर्भवती महिला जांच (Antenatal Check) — ₹300 प्रोत्साहन राशि' 
-                      : 'Antenatal High-Risk Screening — ₹300 Incentive'}
+                  <span className="text-xs font-extrabold text-rose-950">
+                    High-Risk Maternal Case (Pre-eclampsia, Gestational Alert - +₹300 Incentive)
                   </span>
                 </label>
               </div>
 
-              {/* Symptoms with Voice */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-700">{t.symptoms_label}:</label>
+              {/* Symptoms Input with Voice */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-slate-700 block">Symptoms / Observations</label>
                   <button
                     type="button"
                     onClick={isListening ? stopListening : startListening}
-                    className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                      isListening ? 'bg-red-600 text-white animate-pulse' : 'bg-purple-600 hover:bg-purple-700 text-white'
-                    }`}
+                    className="text-xs font-bold text-purple-700 hover:text-purple-900 flex items-center space-x-1"
                   >
-                    {isListening ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
-                    <span>{isListening ? t.listening : t.voice_input}</span>
+                    {isListening ? <MicOff className="w-3.5 h-3.5 text-red-600" /> : <Mic className="w-3.5 h-3.5" />}
+                    <span>{isListening ? 'Listening...' : 'Voice Dictation'}</span>
                   </button>
                 </div>
                 <textarea
+                  rows={2}
                   value={symptoms}
                   onChange={(e) => setSymptoms(e.target.value)}
-                  rows={2}
-                  className="w-full p-3 rounded-xl border border-slate-300 text-xs font-medium focus:ring-2 focus:ring-purple-500 outline-none"
-                  placeholder={language === 'mr' ? 'उदा. ३ दिवसांपासून खोकला, ताप आणि अशक्तपणा...' : language === 'hi' ? 'उदा. 3 दिनों से खांसी, बुखार और कमजोरी...' : 'e.g. Cough, high fever, and body weakness for 3 days...'}
+                  className="w-full p-3 bg-slate-50 rounded-xl border border-slate-300 text-xs font-medium focus:ring-2 focus:ring-purple-500 outline-none"
+                  placeholder="Record patient complaints..."
                 />
               </div>
 
               <button
                 type="submit"
-                className="w-full py-3.5 bg-purple-700 hover:bg-purple-800 active:scale-98 text-white rounded-2xl font-black text-sm shadow-md transition-all"
+                className="w-full py-4 bg-purple-600 hover:bg-purple-700 active:scale-98 text-white font-black text-sm rounded-2xl shadow-lg shadow-purple-600/30 transition-all flex items-center justify-center space-x-2"
               >
-                {t.save_screening_btn}
+                <CheckCircle2 className="w-5 h-5" />
+                <span>Save Screening to Field Register</span>
               </button>
             </form>
           </div>
 
-          {/* Offline Local Records Table */}
-          <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200">
-            <h3 className="text-base font-black text-slate-900 mb-4 flex items-center justify-between">
-              <span>{language === 'mr' ? 'स्थानिक नोंदवही' : language === 'hi' ? 'स्थानीय रजिस्टर' : 'Field Register (Offline Records)'}:</span>
-              <span className="text-xs font-bold text-slate-500">
-                {offlineRecords.length} {language === 'mr' ? 'नोंदी' : language === 'hi' ? 'रिकॉर्ड' : 'Records'}
-              </span>
-            </h3>
+          {/* Quick Right Side Status */}
+          <div className="space-y-6">
+            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-4">
+              <h4 className="text-base font-black text-slate-900">ASHA Sync & Register Status</h4>
+              <div className="p-4 rounded-2xl bg-purple-50 border border-purple-200 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-600 font-semibold">Total Offline Records:</span>
+                  <span className="font-black text-purple-900">{offlineRecords.length}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-600 font-semibold">Pending Server Sync:</span>
+                  <span className="font-black text-amber-700">{pendingSyncCount}</span>
+                </div>
+              </div>
 
-            <div className="space-y-2">
-              {offlineRecords.length === 0 ? (
-                <p className="text-xs text-slate-400 text-center py-4">
-                  {language === 'mr' ? 'कोणतीही नोंद नाही.' : language === 'hi' ? 'कोई रिकॉर्ड नहीं है।' : 'No records yet.'}
-                </p>
-              ) : (
-                offlineRecords.map((r, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between text-xs"
-                  >
-                    <div>
-                      <div className="flex items-center space-x-2">
-                        <span className="font-extrabold text-slate-900">{r.patient_name}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                          r.priority === 'P1' ? 'bg-red-100 text-red-800' : r.priority === 'P2' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
-                        }`}>
-                          {r.priority}
-                        </span>
-                      </div>
-                      <p className="text-slate-500 text-[11px] mt-0.5">{r.triage_reason}</p>
-                    </div>
-
-                    <div className="text-right">
-                      {r.is_synced ? (
-                        <span className="inline-flex items-center text-emerald-700 font-bold text-[11px]">
-                          <Check className="w-3.5 h-3.5 mr-0.5" /> {t.synced_label}
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center text-amber-700 font-bold text-[11px]">
-                          <Clock className="w-3.5 h-3.5 mr-0.5" /> {t.pending_label}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
+              <button
+                onClick={handleBatchSync}
+                disabled={pendingSyncCount === 0}
+                className={`w-full py-3 rounded-xl font-bold text-xs flex items-center justify-center space-x-2 transition-all ${
+                  pendingSyncCount > 0 ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 font-black shadow-md' : 'bg-slate-100 text-slate-400'
+                }`}
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span>Upload {pendingSyncCount} Records to Server</span>
+              </button>
             </div>
           </div>
         </div>
+      )}
 
-        {/* Right 1 Col: ASHA Incentive Tracker & Quick Referral */}
-        <div className="space-y-6">
-          {/* Incentive Dashboard */}
-          <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-4">
-            <div className="flex items-center space-x-2 border-b border-slate-100 pb-3">
-              <Coins className="w-5 h-5 text-amber-500" />
-              <h3 className="text-base font-black text-slate-900">{t.incentive_tracker}</h3>
-            </div>
-
-            {/* Total Earnings Card */}
-            <div className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-2xl p-4 text-white shadow-md">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-100 block">
-                {t.total_earned}
-              </span>
-              <p className="text-3xl font-black font-mono mt-1">
-                ₹{incentives.total_earned_month || 950}
-              </p>
-              <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-white/20 text-xs">
-                <div>
-                  <span className="text-amber-100 text-[10px] block">{language === 'mr' ? 'मंजूर:' : language === 'hi' ? 'स्वीकृत:' : 'Approved:'}</span>
-                  <strong className="font-mono">₹{incentives.pending_disbursal || 450}</strong>
-                </div>
-                <div>
-                  <span className="text-amber-100 text-[10px] block">{language === 'mr' ? 'जमा:' : language === 'hi' ? 'जमा:' : 'Disbursed:'}</span>
-                  <strong className="font-mono">₹{incentives.disbursed_total || 500}</strong>
-                </div>
-              </div>
-            </div>
-
-            {/* Incentive Slabs */}
-            <div className="text-xs space-y-2 text-slate-700">
-              <p className="font-bold text-slate-900">
-                {language === 'mr' ? 'प्रोत्साहन भत्त्याचे दर:' : language === 'hi' ? 'प्रोत्साहन राशि दर:' : 'Incentive Slabs (NHM):'}
-              </p>
-              <div className="flex justify-between p-2 bg-slate-50 rounded-xl">
-                <span>{language === 'mr' ? 'गरोदर माता तपासणी (P1):' : language === 'hi' ? 'गर्भवती जांच (P1):' : 'Antenatal Screening (P1):'}</span>
-                <span className="font-bold text-purple-800">₹३००</span>
-              </div>
-              <div className="flex justify-between p-2 bg-slate-50 rounded-xl">
-                <span>{language === 'mr' ? 'आपत्कालीन ट्रायज (P1/P2):' : language === 'hi' ? 'आपातकालीन जांच (P1/P2):' : 'Emergency Triage (P1/P2):'}</span>
-                <span className="font-bold text-purple-800">₹१५०</span>
-              </div>
-              <div className="flex justify-between p-2 bg-slate-50 rounded-xl">
-                <span>{language === 'mr' ? 'सामान्य आरोग्य तपासणी:' : language === 'hi' ? 'सामान्य स्वास्थ्य जांच:' : 'Routine Checkup:'}</span>
-                <span className="font-bold text-purple-800">₹१००</span>
-              </div>
-            </div>
+      {/* ---------------- 2. VILLAGE PATIENTS ---------------- */}
+      {activeTab === 'village_patients' && (
+        <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-200 space-y-6">
+          <div className="border-b border-slate-100 pb-4">
+            <h3 className="text-xl font-black text-slate-900">Village Household Directory</h3>
+            <p className="text-xs text-slate-500 font-medium">Assigned households and screened village citizens</p>
           </div>
 
-          {/* Quick Referral Card */}
-          <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-4">
-            <div className="flex items-center space-x-2 border-b border-slate-100 pb-3">
-              <ArrowUpRight className="w-5 h-5 text-teal-600" />
-              <h3 className="text-base font-black text-slate-900">{t.create_referral}</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {villagePatients.map((p) => (
+              <div key={p.id} className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h4 className="text-base font-black text-slate-900">{p.name}</h4>
+                    <p className="text-xs text-slate-500">{p.age} yrs • {p.gender} {p.village ? `• Village: ${p.village}` : ''}</p>
+                  </div>
+                  <span className="text-xs font-mono font-bold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-xl border border-purple-200">
+                    {p.abha_id || 'ABHA Linked'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600">📱 Mobile: {p.phone}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ---------------- 3. RISK-LEVEL OVERVIEW ---------------- */}
+      {activeTab === 'risk_overview' && (
+        <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-200 space-y-6">
+          <div className="border-b border-slate-100 pb-4">
+            <h3 className="text-xl font-black text-slate-900">Village Risk-Level Surveillance</h3>
+            <p className="text-xs text-slate-500 font-medium">Population stratification by clinical severity</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="p-5 rounded-2xl bg-red-50 border border-red-200">
+              <h4 className="text-base font-black text-red-950">P1 High-Risk & Maternal</h4>
+              <p className="text-xs text-red-800 mt-1">Requiring immediate PHC escort & 108 ambulance referral.</p>
+              <div className="text-3xl font-black text-red-600 mt-3">{p1Count || 2} Cases</div>
             </div>
 
-            <form onSubmit={handleCreateReferral} className="space-y-3 text-xs font-bold">
-              <div>
-                <label className="text-slate-700 block mb-1">{t.name}:</label>
-                <input
-                  type="text"
-                  required
-                  value={referralPatient}
-                  onChange={(e) => setReferralPatient(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-300 font-semibold"
-                  placeholder={language === 'mr' ? 'उदा. सविता ताई जाधव' : language === 'hi' ? 'उदा. सविता जाधव' : 'e.g. Savita Jadhav'}
-                />
-              </div>
+            <div className="p-5 rounded-2xl bg-amber-50 border border-amber-200">
+              <h4 className="text-base font-black text-amber-950">P2 Urgent Attention</h4>
+              <p className="text-xs text-amber-800 mt-1">High fever &gt;3 days requiring medical officer review.</p>
+              <div className="text-3xl font-black text-amber-600 mt-3">{p2Count || 1} Cases</div>
+            </div>
 
-              <div>
-                <label className="text-slate-700 block mb-1">
-                  {language === 'mr' ? 'कुठे पाठवायचे:' : language === 'hi' ? 'कहां भेजना है:' : 'Target Facility:'}
-                </label>
-                <select
-                  value={referralTarget}
-                  onChange={(e) => setReferralTarget(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-300 font-semibold"
-                >
-                  <option value="Kharpudi PHC">{t.facility_phc}</option>
-                  <option value="Manchar Rural Hospital">{t.facility_rh}</option>
-                  <option value="Pune District Hospital">{t.facility_dh}</option>
-                </select>
-              </div>
+            <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200">
+              <h4 className="text-base font-black text-emerald-950">P3 Routine Care</h4>
+              <p className="text-xs text-emerald-800 mt-1">Stable baselines and monthly chronic medicine refills.</p>
+              <div className="text-3xl font-black text-emerald-600 mt-3">{p3Count || 1} Cases</div>
+            </div>
+          </div>
+        </div>
+      )}
 
-              <div>
-                <label className="text-slate-700 block mb-1">
-                  {language === 'mr' ? 'प्राधान्य:' : language === 'hi' ? 'प्राथमिकता:' : 'Priority Level:'}
-                </label>
-                <div className="flex gap-2">
-                  {(['P1', 'P2', 'P3'] as const).map(p => (
+      {/* ---------------- 4. PENDING REFERRALS ---------------- */}
+      {activeTab === 'referrals' && (
+        <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-200 space-y-6">
+          <div className="border-b border-slate-100 pb-4">
+            <h3 className="text-xl font-black text-slate-900">Village Referral Follow-up Tracker</h3>
+            <p className="text-xs text-slate-500 font-medium">Track village patients referred to Health Centres or Hospitals</p>
+          </div>
+
+          <div className="space-y-3">
+            {referrals.map((r) => (
+              <div key={r.id} className="p-5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <span className="bg-purple-100 text-purple-900 text-[10px] font-black px-2 py-0.5 rounded-full">
+                      {r.priority} Priority
+                    </span>
+                    <h4 className="text-base font-black text-slate-900">{r.patient_name}</h4>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Destination: <strong className="text-slate-900">{r.target_facility}</strong> • Transport: {r.transport_mode}
+                  </p>
+                  <p className="text-xs text-slate-600 mt-0.5">{r.reason}</p>
+                </div>
+
+                <span className="text-xs font-extrabold bg-teal-100 text-teal-900 px-3 py-1 rounded-xl border border-teal-300">
+                  Status: {r.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ---------------- 5. HOME VISIT FOLLOW-UPS ---------------- */}
+      {activeTab === 'followups' && (
+        <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-200 space-y-6">
+          <div className="border-b border-slate-100 pb-4">
+            <h3 className="text-xl font-black text-slate-900">Home Visit Care Tasks Checklist</h3>
+            <p className="text-xs text-slate-500 font-medium">Post-discharge monitoring, antenatal visits & routine blood pressure checks</p>
+          </div>
+
+          <div className="space-y-3">
+            {[
+              { id: 1, name: villagePatients[0]?.name || "Maternal Care Patient", task: "High-risk pregnancy BP check & pre-eclampsia symptom review", time: "Today, 10:00 AM", status: "Completed" },
+              { id: 2, name: villagePatients[1]?.name || "Elderly Care Patient", task: "Post-treatment pulse oximetry SpO2 check (target >95%)", time: "Today, 02:00 PM", status: "Pending" },
+              { id: 3, name: villagePatients[2]?.name || "Chronic Care Patient", task: "Hypertension & monthly medicine refill verification", time: "Tomorrow, 11:00 AM", status: "Pending" }
+            ].map((task) => {
+              const isCompleted = completedFollowups.includes(task.id);
+              return (
+                <div key={task.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
                     <button
-                      type="button"
-                      key={p}
-                      onClick={() => setReferralPriority(p)}
-                      className={`flex-1 py-1.5 rounded-xl font-black ${
-                        referralPriority === p
-                          ? (p === 'P1' ? 'bg-red-600 text-white' : p === 'P2' ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white')
-                          : 'bg-slate-100 text-slate-600'
+                      onClick={() => {
+                        setCompletedFollowups(prev => 
+                          prev.includes(task.id) ? prev.filter(i => i !== task.id) : [...prev, task.id]
+                        );
+                      }}
+                      className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${
+                        isCompleted ? 'bg-purple-600 border-purple-600 text-white' : 'border-slate-300 bg-white'
                       }`}
                     >
-                      {p}
+                      {isCompleted && <Check className="w-4 h-4" />}
                     </button>
-                  ))}
+                    <div>
+                      <h4 className={`text-sm font-black ${isCompleted ? 'line-through text-slate-400' : 'text-slate-900'}`}>
+                        {task.name}
+                      </h4>
+                      <p className="text-xs text-slate-500">{task.task}</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-slate-400">{task.time}</span>
                 </div>
-              </div>
-
-              <div>
-                <label className="text-slate-700 block mb-1">
-                  {language === 'mr' ? 'रेफरलचे कारण:' : language === 'hi' ? 'रेफरल का कारण:' : 'Referral Reason:'}
-                </label>
-                <textarea
-                  value={referralReason}
-                  onChange={(e) => setReferralReason(e.target.value)}
-                  rows={2}
-                  className="w-full p-2.5 rounded-xl border border-slate-300 font-medium"
-                  placeholder={language === 'mr' ? 'तपासणीसाठी...' : language === 'hi' ? 'जांच के लिए...' : 'Clinical reasoning for referral...'}
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-3 bg-teal-700 hover:bg-teal-800 text-white rounded-xl font-bold shadow-md transition-all"
-              >
-                {language === 'mr' ? 'रेफरल पाठवा' : language === 'hi' ? 'रेफरल भेजें' : 'Submit Referral'}
-              </button>
-            </form>
+              );
+            })}
           </div>
         </div>
-      </div>
+      )}
+
+      {/* ---------------- 6. NHM INCENTIVES ---------------- */}
+      {activeTab === 'incentives' && (
+        <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-200 space-y-6">
+          <div className="border-b border-slate-100 pb-4">
+            <h3 className="text-xl font-black text-slate-900">National Health Mission (NHM) Incentives</h3>
+            <p className="text-xs text-slate-500 font-medium">Monthly screening, maternal tracking & emergency escort earnings ledger</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="p-5 rounded-2xl bg-purple-50 border border-purple-200">
+              <h4 className="text-xs font-bold text-purple-900 uppercase">Total Earned This Month</h4>
+              <div className="text-3xl font-black text-purple-700 mt-2">₹{incentives.total_earned_month || 1250}</div>
+            </div>
+            <div className="p-5 rounded-2xl bg-amber-50 border border-amber-200">
+              <h4 className="text-xs font-bold text-amber-900 uppercase">Pending Disbursal (DBT)</h4>
+              <div className="text-3xl font-black text-amber-700 mt-2">₹{incentives.pending_disbursal || 450}</div>
+            </div>
+            <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200">
+              <h4 className="text-xs font-bold text-emerald-900 uppercase">Disbursed to Bank</h4>
+              <div className="text-3xl font-black text-emerald-700 mt-2">₹{incentives.disbursed_total || 800}</div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

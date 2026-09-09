@@ -1,0 +1,28 @@
+services:
+  # ─── Backend: FastAPI on Supabase PostgreSQL ─────────────────────────────────
+  - type: web
+    name: sevasetu-backend
+    env: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false   # Set this manually in Render dashboard → Environment
+
+  # ─── Frontend: Vite/React Static Site ────────────────────────────────────────
+  - type: web
+    name: sevasetu-frontend
+    env: static
+    plan: free
+    region: oregon
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: ./frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false   # Set to: https://sevasetu-backend.onrender.com/api
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

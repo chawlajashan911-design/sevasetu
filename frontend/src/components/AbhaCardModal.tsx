@@ -21,11 +21,11 @@ export const AbhaCardModal: React.FC<AbhaCardModalProps> = ({
   if (!isOpen) return null;
 
   const abhaNumber = patient?.abha_id || "14-8832-9012-4412";
-  const name = patient?.name || "Savita Tai Jadhav";
-  const age = patient?.age || 28;
+  const name = patient?.name || "Citizen Patient";
+  const age = patient?.age || 32;
   const gender = patient?.gender || "Female";
-  const phone = patient?.phone || "9822104512";
-  const village = patient?.village || "Kharpudi";
+  const phone = patient?.phone || "";
+  const village = patient?.village || "Maharashtra";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fadeIn">

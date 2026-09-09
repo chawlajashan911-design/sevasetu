@@ -43,7 +43,7 @@ export const EmergencySOSModal: React.FC<EmergencySOSModalProps> = ({
 
   const mapsUrl = `https://www.google.com/maps?q=${gpsLocation.lat},${gpsLocation.lng}`;
   const smsBody = encodeURIComponent(
-    `EMERGENCY MEDICAL SOS: Immediate ambulance required at Village: Kharpudi (Ambegaon). GPS Coordinates: ${gpsLocation.lat.toFixed(5)}, ${gpsLocation.lng.toFixed(5)}. Google Maps: ${mapsUrl}`
+    `EMERGENCY MEDICAL SOS: Immediate ambulance required at Village: ${gpsLocation.villageName || 'Maharashtra'}. Coordinates: ${gpsLocation.lat.toFixed(5)}, ${gpsLocation.lng.toFixed(5)}. Maps: ${mapsUrl}`
   );
   const smsLink = `sms:108?&body=${smsBody}`;
 
@@ -133,7 +133,7 @@ export const EmergencySOSModal: React.FC<EmergencySOSModalProps> = ({
               </span>
             </a>
 
-            {/* Broadcast GPS SMS to 108 & Kharpudi PHC */}
+            {/* Broadcast GPS SMS to 108 & PHC */}
             <button
               onClick={handleSendSOSBroadcast}
               className="w-full flex items-center justify-center space-x-3 bg-slate-900 hover:bg-slate-800 active:scale-98 text-white p-3.5 rounded-2xl font-bold text-sm transition-all"
@@ -145,25 +145,25 @@ export const EmergencySOSModal: React.FC<EmergencySOSModalProps> = ({
             </button>
           </div>
 
-          {/* Quick Direct Contacts to Kharpudi Facilities */}
+          {/* Quick Direct Contacts to Emergency Helplines */}
           <div className="border-t border-slate-200 pt-4">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2.5">
               {language === 'mr' ? 'स्थानिक आपत्कालीन संपर्क:' : language === 'hi' ? 'स्थानीय आपातकालीन संपर्क:' : 'Local Emergency Helplines:'}
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
               <a
-                href="tel:02133222102"
+                href="tel:108"
                 className="flex items-center justify-between p-2.5 bg-teal-50 hover:bg-teal-100 rounded-xl border border-teal-200 font-semibold text-teal-950 transition-colors"
               >
-                <span>{language === 'mr' ? 'खरपुडी PHC डॉक्टर:' : language === 'hi' ? 'खरपुडी PHC डॉक्टर:' : 'Kharpudi PHC Doctor:'}</span>
-                <span className="font-mono font-bold text-teal-800">02133 222102</span>
+                <span>{language === 'mr' ? '१०८ आपत्कालीन रुग्णवाहिका:' : language === 'hi' ? '108 आपातकालीन एम्बुलेंस:' : '108 Emergency Ambulance:'}</span>
+                <span className="font-mono font-bold text-teal-800">108</span>
               </a>
               <a
-                href="tel:9822001122"
+                href="tel:104"
                 className="flex items-center justify-between p-2.5 bg-purple-50 hover:bg-purple-100 rounded-xl border border-purple-200 font-semibold text-purple-950 transition-colors"
               >
-                <span>{language === 'mr' ? 'आशा सेविका (सुनिता ताई):' : language === 'hi' ? 'आशा कार्यकर्ता (सुनीता ताई):' : 'ASHA Worker (Sunita Tai):'}</span>
-                <span className="font-mono font-bold text-purple-800">9822001122</span>
+                <span>{language === 'mr' ? '१०४ आरोग्य सल्ला हेल्पलाइन:' : language === 'hi' ? '104 स्वास्थ्य सलाह हेल्पलाइन:' : '104 Health Helpline:'}</span>
+                <span className="font-mono font-bold text-purple-800">104</span>
               </a>
             </div>
           </div>
