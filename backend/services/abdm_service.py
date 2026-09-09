@@ -6,11 +6,60 @@ Manages dynamic ABHA ID minting, OTP request/verification, and FHIR R4 Bundle ge
 import os
 import uuid
 import random
+import urllib.request
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 
 class AbdmService:
+    @classmethod
+    def _send_otp_whatsapp(cls, phone: str, otp: str) -> None:
+        access_token = os.getenv("WHATSAPP_ACCESS_TOKEN")
+        phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+        template_name = os.getenv("WHATSAPP_OTP_TEMPLATE", "sevasetu_otp")
+        template_language = os.getenv("WHATSAPP_TEMPLATE_LANGUAGE", "en_US")
+        graph_version = os.getenv("WHATSAPP_GRAPH_API_VERSION", "v20.0")
+
+        if not access_token or not phone_number_id:
+            raise RuntimeError(
+                "WhatsApp OTP is not configured. Set WHATSAPP_ACCESS_TOKEN "
+                "and WHATSAPP_PHONE_NUMBER_ID, and create the approved "
+                f"'{template_name}' authentication template in Meta Business Manager."
+            )
+
+        clean_phone = "".join(ch for ch in phone if ch.isdigit())
+        if len(clean_phone) == 10:
+            clean_phone = f"+91{clean_phone}"
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": clean_phone,
+            "type": "template",
+            "template": {
+                "name": template_name,
+                "language": {"code": template_language},
+                "components": [{
+                    "type": "body",
+                    "parameters": [{"type": "text", "text": otp}],
+                }],
+            },
+        }
+        request = urllib.request.Request(
+            f"https://graph.facebook.com/{graph_version}/{phone_number_id}/messages",
+            data=__import__("json").dumps(payload).encode(),
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                if response.status >= 300:
+                    raise RuntimeError(f"WhatsApp rejected OTP with HTTP {response.status}")
+        except Exception as exc:
+            raise RuntimeError(f"WhatsApp OTP delivery failed: {exc}") from exc
+
     @classmethod
     def generate_abha_id(cls, name: str, phone: str) -> Dict[str, str]:
         """
@@ -37,7 +86,7 @@ class AbdmService:
         }
 
     @classmethod
-    def request_otp(cls, identifier: str, role: str = "patient", db: Optional[Session] = None) -> Dict[str, Any]:
+    def request_otp(cls, identifier: str, role: str = "patient", db: Optional[Session] = None, demo: bool = False) -> Dict[str, Any]:
         """
         Initiates OTP authentication for a 10-digit mobile number or 14-digit ABHA address.
         Generates a secure 6-digit OTP and session tracking.
@@ -47,6 +96,9 @@ class AbdmService:
         # Generate dynamic 6-digit OTP
         otp = f"{random.randint(100000, 999999)}"
 
+        if not demo:
+            cls._send_otp_whatsapp(clean_id, otp)
+
         if db is not None:
             try:
                 from ..models import OtpSession
@@ -55,7 +107,8 @@ class AbdmService:
                     identifier=clean_id,
                     otp_code=otp,
                     role=role,
-                    is_verified=False
+                    is_verified=False,
+                    expires_at=datetime.utcnow() + timedelta(minutes=5),
                 )
                 db.add(sess)
                 db.commit()
@@ -63,18 +116,19 @@ class AbdmService:
                 db.rollback()
                 print(f"Error saving OTP session: {e}")
 
-        # Returns session_id and otp (for developer/evaluator sandbox display)
-        return {
+        response = {
             "success": True,
             "status": "success",
             "session_id": session_id,
             "identifier": clean_id,
             "role": role,
-            "otp": otp,  # Provided for seamless sandbox evaluation
-            "otp_preview": otp,
-            "message": f"ABDM OTP successfully dispatched to {clean_id}",
+            "message": f"OTP sent to {clean_id}",
             "expires_in_seconds": 300
         }
+        if demo:
+            response["otp_preview"] = otp
+            response["message"] = "Demo OTP generated for local review"
+        return response
 
     @classmethod
     def verify_otp(
@@ -98,16 +152,29 @@ class AbdmService:
             try:
                 from ..models import OtpSession, Patient
                 sess = db.query(OtpSession).filter(OtpSession.session_id == session_id).first()
-                if sess:
-                    if sess.otp_code != clean_otp and clean_otp != "123456":
-                        # Also allow 123456 as master evaluation override if needed, but validate real otp
-                        return {
-                            "success": False,
-                            "message": "Invalid OTP code entered. Please try again."
-                        }
-                    sess.is_verified = True
-                    identifier = sess.identifier
-                    db.commit()
+                if not sess:
+                    return {
+                        "success": False,
+                        "message": "OTP session not found. Request a new OTP."
+                    }
+                if sess.is_verified:
+                    return {
+                        "success": False,
+                        "message": "This OTP session has already been used. Request a new OTP."
+                    }
+                if sess.expires_at < datetime.utcnow():
+                    return {
+                        "success": False,
+                        "message": "This OTP has expired. Request a new OTP."
+                    }
+                if sess.otp_code != clean_otp:
+                    return {
+                        "success": False,
+                        "message": "Invalid OTP code entered. Please try again."
+                    }
+                sess.is_verified = True
+                identifier = sess.identifier
+                db.commit()
             except Exception as e:
                 print(f"OTP verification DB check error: {e}")
 

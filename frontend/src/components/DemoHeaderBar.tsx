@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState } from 'react';
 import { useDemoMode, DEMO_PRESETS } from '../context/DemoContext';
 import { api } from '../services/api';

@@ -129,6 +129,7 @@ class InventoryUpdate(BaseModel):
 class OtpRequest(BaseModel):
     identifier: str  # 10-digit phone or 14-digit ABHA
     role: Optional[str] = "patient"
+    demo: bool = False
 
 class OtpVerifyRequest(BaseModel):
     session_id: str

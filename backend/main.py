@@ -3,7 +3,8 @@ from datetime import datetime
 from typing import List, Optional
 
 from dotenv import load_dotenv
-load_dotenv()  # Load .env for local development
+
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,11 +23,13 @@ from .schemas import (
     TriageEvaluationRequest, TriageEvaluationResponse,
     DoctorVerificationRequest, ReferralCreate,
     AppointmentCreate, AppointmentResponse, AppointmentStatusUpdate,
-    BatchSyncRequest, InventoryUpdate, VitalsInput
+    BatchSyncRequest, InventoryUpdate, VitalsInput,
+    OtpRequest, OtpVerifyRequest
 )
 from .triage_engine import triage_engine
 from .mock_services import BhashiniService, AbdmFhirService, ESanjeevaniService
-from .seed_data import seed_database, FACILITIES
+from .services.abdm_service import AbdmService
+from .seed_data import seed_database, reset_dynamic_data, seed_demo_data, FACILITIES
 from .hospital_loader import hospital_directory
 
 # Initialize DB tables (creates any missing tables — idempotent on Supabase)
@@ -50,6 +53,84 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ----------------- OTP & ABHA Authentication -----------------
+@app.post("/api/v1/auth/request-otp")
+def request_otp(req: OtpRequest, db: Session = Depends(get_db)):
+    identifier = req.identifier.strip()
+    if not identifier:
+        raise HTTPException(status_code=400, detail="Phone number or ABHA identifier is required")
+    try:
+        return AbdmService.request_otp(identifier, req.role or "patient", db, req.demo)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/auth/verify-otp")
+def verify_otp(req: OtpVerifyRequest, db: Session = Depends(get_db)):
+    result = AbdmService.verify_otp(
+        session_id=req.session_id,
+        otp=req.otp,
+        role=req.role or "patient",
+        custom_name=req.name,
+        village=req.village,
+        taluka=req.taluka,
+        district=req.district,
+        db=db,
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=401, detail=result.get("message", "OTP verification failed"))
+    return result
+
+
+@app.post("/api/v1/auth/verify-abha")
+def verify_abha(req: dict):
+    result = AbdmService.verify_abha_id(req.get("abha_id", ""))
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("message", "ABHA ID not found"))
+    return result
+
+
+@app.post("/api/v1/system/reset-data")
+def reset_system_data(db: Session = Depends(get_db)):
+    reset_dynamic_data(db)
+    return {"success": True, "message": "Dynamic application data reset"}
+
+
+@app.post("/api/v1/system/demo-data")
+def load_demo_data(db: Session = Depends(get_db)):
+    seed_demo_data(db)
+    return {"success": True, "message": "Demo patients, triage, referrals, follow-ups, incentives, outbreaks, and medicines loaded"}
+
+
+@app.get("/api/v1/auth/check-abha")
+def check_abha(phone: str, db: Session = Depends(get_db)):
+    clean_phone = "".join(ch for ch in phone if ch.isdigit())[-10:]
+    official = AbdmService.find_official_registry_entry(clean_phone)
+    patient = db.query(Patient).filter(Patient.phone == clean_phone).first()
+    if official:
+        return {
+            "exists": True,
+            "has_abha": True,
+            "phone": clean_phone,
+            "abha_number": official["abha_number"],
+            "patient": official,
+        }
+    if patient:
+        return {
+            "exists": True,
+            "has_abha": bool(patient.abha_id),
+            "phone": clean_phone,
+            "abha_number": patient.abha_id,
+            "patient": {
+                "name": patient.name,
+                "village": patient.village,
+                "taluka": patient.taluka,
+                "district": patient.district,
+            },
+        }
+    return {"exists": False, "has_abha": False, "phone": clean_phone}
 
 
 # ----------------- API Root & Health -----------------

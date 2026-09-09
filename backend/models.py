@@ -185,3 +185,16 @@ class AshaIncentive(Base):
     amount = Column(Float, nullable=False)
     status = Column(String(30), default="Approved")  # Pending, Approved, Disbursed
     recorded_at = Column(DateTime, default=datetime.utcnow)
+
+
+class OtpSession(Base):
+    __tablename__ = "otp_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(80), unique=True, nullable=False, index=True)
+    identifier = Column(String(100), nullable=False, index=True)
+    otp_code = Column(String(6), nullable=False)
+    role = Column(String(30), default="patient")
+    is_verified = Column(Boolean, default=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)

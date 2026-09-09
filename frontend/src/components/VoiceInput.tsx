@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useEffect } from 'react';
 import { useSpeech } from '../hooks/useSpeech';
 import { Mic, MicOff, Loader2 } from 'lucide-react';

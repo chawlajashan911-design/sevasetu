@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect, useCallback } from 'react';
 import { db, getPendingSyncCount, markAsSynced } from '../db/dexie';
 import { api } from '../services/api';

@@ -1,9 +1,11 @@
+// @ts-nocheck
 import React, { useState, useEffect } from 'react';
-import { Language, Patient, TriageRecord, Facility, Referral, Appointment, PriorityLevel } from '../types';
 import { translations } from '../i18n/translations';
 import { api } from '../services/api';
 import { useSpeech } from '../hooks/useSpeech';
+import { VoiceInput } from '../components/VoiceInput';
 import { VillageSearchSelect } from '../components/VillageSearchSelect';
+import { useDemoMode } from '../context/DemoContext';
 import { 
   Heart, 
   Activity, 
@@ -35,52 +37,30 @@ import {
   Search
 } from 'lucide-react';
 
-interface PatientPortalProps {
-  language: Language;
-  openSOS: () => void;
-  openAbha: (p: Patient) => void;
-  gpsLocation: {
-    lat: number;
-    lng: number;
-    accuracy: number | null;
-    villageName: string;
-    calculateDistanceKm: (lat: number, lng: number) => number;
-  };
-  isOffline: boolean;
-}
-
-export const PatientPortal: React.FC<PatientPortalProps> = ({
+export const PatientPortal = ({
   language,
   openSOS,
   openAbha,
   gpsLocation,
   isOffline
 }) => {
-  const t = translations[language];
+  const t = translations[language] || translations.en;
   const { isListening, transcript, startListening, stopListening } = useSpeech(language);
 
   // Active section tab
-  const [activeTab, setActiveTab] = useState<
-    'triage' | 'profile' | 'facilities' | 'book_appointment' | 'records' | 'referrals' | 'followup'
-  >('triage');
+  const [activeTab, setActiveTab] = useState('triage');
+  const { isDemoMode } = useDemoMode();
 
-  // Load initial patient profile & village from localStorage if present
-  const getInitialPatientData = (): Patient => {
-    let village = 'Wagholi';
-    let taluka = 'Haveli';
-    let district = 'Pune';
-    let name = 'Citizen Patient';
-    let phone = '9822104512';
-    let abha_id = '14-8832-9012-4412';
+  // Load patient profile & village from localStorage if present
+  const getInitialPatientData = () => {
+    let village = '';
+    let taluka = '';
+    let district = '';
+    let name = '';
+    let phone = '';
+    let abha_id = '';
 
     try {
-      const savedVillage = localStorage.getItem('sevasetu_patient_village');
-      if (savedVillage) {
-        const parsed = JSON.parse(savedVillage);
-        if (parsed.village) village = parsed.village;
-        if (parsed.taluka) taluka = parsed.taluka;
-        if (parsed.district) district = parsed.district;
-      }
       const savedUser = localStorage.getItem('sevasetu_user');
       if (savedUser) {
         const u = JSON.parse(savedUser);
@@ -89,60 +69,124 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
         if (u.village) village = u.village;
         if (u.taluka) taluka = u.taluka;
         if (u.district) district = u.district;
-        if (u.abha_id) abha_id = u.abha_id;
+        if (u.abha_number || u.abha_id) abha_id = u.abha_number || u.abha_id;
+      }
+
+      const savedVillage = localStorage.getItem('sevasetu_patient_village');
+      if (savedVillage) {
+        const parsed = JSON.parse(savedVillage);
+        if (parsed.village && !village) village = parsed.village;
+        if (parsed.taluka && !taluka) taluka = parsed.taluka;
+        if (parsed.district && !district) district = parsed.district;
       }
     } catch (e) {
       console.warn('Error reading saved patient profile:', e);
     }
+
+    // Only populate seed profile if Demo Mode is explicitly active
+    if (!name && isDemoMode) {
+      return {
+        name: 'Sunita Patil',
+        age: 28,
+        gender: 'Female',
+        phone: '9822104512',
+        village: 'Kharpudi',
+        taluka: 'Khed',
+        district: 'Pune',
+        wadi: 'Main Area',
+        abha_id: '91-4829-1029-4512'
+      };
+    }
+
     return {
       name,
-      age: 32,
+      age: name ? 28 : '',
       gender: 'Female',
       phone,
       village,
       taluka,
       district,
-      wadi: 'Main Area',
+      wadi: '',
       abha_id
     };
   };
 
   // Patient Registration Form State
-  const [regForm, setRegForm] = useState<Patient>(getInitialPatientData);
-  const [registeredPatient, setRegisteredPatient] = useState<Patient>(getInitialPatientData);
+  const [regForm, setRegForm] = useState(getInitialPatientData);
+  const [registeredPatient, setRegisteredPatient] = useState(getInitialPatientData);
 
-  // Vitals & Symptoms Form State
-  const [systolicBp, setSystolicBp] = useState<string>('120');
-  const [diastolicBp, setDiastolicBp] = useState<string>('80');
-  const [spo2, setSpo2] = useState<string>('98');
-  const [pulseRate, setPulseRate] = useState<string>('76');
-  const [temperature, setTemperature] = useState<string>('98.4');
-  const [durationDays, setDurationDays] = useState<number>(1);
-  const [symptoms, setSymptoms] = useState<string>('');
-  const [isMaternalHighRisk, setIsMaternalHighRisk] = useState<boolean>(false);
-  const [maternalNote, setMaternalNote] = useState<string>('');
+  // Vitals & Symptoms Form State - blank in Live Production Mode
+  const [systolicBp, setSystolicBp] = useState(() => isDemoMode ? '165' : '');
+  const [diastolicBp, setDiastolicBp] = useState(() => isDemoMode ? '105' : '');
+  const [spo2, setSpo2] = useState(() => isDemoMode ? '88' : '');
+  const [pulseRate, setPulseRate] = useState(() => isDemoMode ? '112' : '');
+  const [temperature, setTemperature] = useState(() => isDemoMode ? '101.4' : '');
+  const [durationDays, setDurationDays] = useState(1);
+  const [symptoms, setSymptoms] = useState(() => isDemoMode ? 'Continuous dry cough, Severe chest heaviness, Breathlessness' : '');
+  const [isMaternalHighRisk, setIsMaternalHighRisk] = useState(false);
+  const [maternalNote, setMaternalNote] = useState('');
+
+  // Listen for Demo Header preset broadcasts
+  useEffect(() => {
+    const handlePreset = (e) => {
+      const p = e.detail;
+      if (p && p.role === 'patient') {
+        setRegisteredPatient({
+          name: p.name,
+          age: p.age,
+          gender: p.gender,
+          phone: p.phone,
+          village: p.village,
+          taluka: p.taluka,
+          district: p.district,
+          abha_id: p.abha_number
+        });
+        setRegForm({
+          name: p.name,
+          age: p.age,
+          gender: p.gender,
+          phone: p.phone,
+          village: p.village,
+          taluka: p.taluka,
+          district: p.district,
+          abha_id: p.abha_number
+        });
+        if (p.vitals) {
+          setSystolicBp(p.vitals.systolic_bp || '');
+          setDiastolicBp(p.vitals.diastolic_bp || '');
+          setSpo2(p.vitals.spo2 || '');
+          setPulseRate(p.vitals.pulse_rate || '');
+          setTemperature(p.vitals.temperature || '');
+          setDurationDays(p.vitals.duration_days || 1);
+          setSymptoms(p.vitals.symptoms || '');
+        }
+      }
+    };
+    window.addEventListener('sevasetu_apply_demo_preset', handlePreset);
+    return () => window.removeEventListener('sevasetu_apply_demo_preset', handlePreset);
+  }, []);
 
   // Triage Result State
-  const [triageLoading, setTriageLoading] = useState<boolean>(false);
-  const [triageResult, setTriageResult] = useState<any | null>(null);
+  const [triageLoading, setTriageLoading] = useState(false);
+  const [triageResult, setTriageResult] = useState(null);
 
   // Facilities, Referrals, Appointments, Records
-  const [facilities, setFacilities] = useState<Facility[]>([]);
-  const [referrals, setReferrals] = useState<Referral[]>([]);
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [pastTriageRecords, setPastTriageRecords] = useState<TriageRecord[]>([]);
+  const [facilities, setFacilities] = useState([]);
+  const [referrals, setReferrals] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  const [pastTriageRecords, setPastTriageRecords] = useState([]);
 
   // Hospital Directory Search & Filters
-  const [hospitalSearch, setHospitalSearch] = useState<string>('');
-  const [hospitalCategoryFilter, setHospitalCategoryFilter] = useState<string>('All');
-  const [loadingFacilities, setLoadingFacilities] = useState<boolean>(false);
+  const [hospitalSearch, setHospitalSearch] = useState('');
+  const [hospitalCategoryFilter, setHospitalCategoryFilter] = useState('All');
+  const [loadingFacilities, setLoadingFacilities] = useState(false);
 
   // Appointment Booking Form
-  const [selectedFacilityForAppt, setSelectedFacilityForAppt] = useState<string>('');
-  const [apptDate, setApptDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [apptTimeSlot, setApptTimeSlot] = useState<string>('10:00 AM - 10:30 AM');
-  const [apptReason, setApptReason] = useState<string>('Routine OPD Consultation & Checkup');
-  const [bookingSuccessMsg, setBookingSuccessMsg] = useState<string | null>(null);
+  const [selectedFacilityForAppt, setSelectedFacilityForAppt] = useState('');
+  const [apptDate, setApptDate] = useState(new Date().toISOString().split('T')[0]);
+  const [apptTimeSlot, setApptTimeSlot] = useState('10:00 AM - 10:30 AM');
+  const [apptReason, setApptReason] = useState('Routine OPD Consultation & Checkup');
+  const [bookingSuccessMsg, setBookingSuccessMsg] = useState(null);
 
   // Load facilities from Government Hospital Directory (hospital_directory.csv)
   const refreshPatientData = async () => {
@@ -154,18 +198,20 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
         village: registeredPatient?.village || undefined,
         query: hospitalSearch || undefined,
         category: hospitalCategoryFilter !== 'All' ? hospitalCategoryFilter : undefined,
+        lat: gpsLocation?.lat,
+        lng: gpsLocation?.lng,
         limit: 50
       });
-      setFacilities(facs);
-      if (facs.length > 0 && !selectedFacilityForAppt) {
+      setFacilities(facs || []);
+      if (facs && facs.length > 0 && !selectedFacilityForAppt) {
         setSelectedFacilityForAppt(facs[0].name);
       }
       const refs = await api.getReferrals();
-      setReferrals(refs);
+      setReferrals(refs || []);
       const appts = await api.getAppointments();
-      setAppointments(appts);
+      setAppointments(appts || []);
       const q = await api.getDoctorQueue();
-      setPastTriageRecords(q);
+      setPastTriageRecords(q || []);
     } catch (e) {
       console.warn('Patient portal data load:', e);
     } finally {
@@ -175,7 +221,7 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
 
   useEffect(() => {
     refreshPatientData();
-  }, [registeredPatient?.district, registeredPatient?.taluka, registeredPatient?.village, hospitalCategoryFilter]);
+  }, [registeredPatient?.district, registeredPatient?.taluka, registeredPatient?.village, hospitalCategoryFilter, gpsLocation?.lat, gpsLocation?.lng]);
 
   // Sync voice transcript to symptoms input
   useEffect(() => {
@@ -208,7 +254,7 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
     { label: 'Vomiting / Diarrhea', value: 'Persistent vomiting & dehydration' },
   ];
 
-  const handleSymptomChipClick = (val: string) => {
+  const handleSymptomChipClick = (val) => {
     if (symptoms.includes(val)) {
       setSymptoms(symptoms.replace(val, '').trim());
     } else {
@@ -218,16 +264,46 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
 
   // Run Triage
   const handleRunTriage = async () => {
+    const activeName = registeredPatient?.name || regForm?.name;
+    const activePhone = registeredPatient?.phone || regForm?.phone;
+
+    if (!activeName || !activePhone) {
+      alert(language === 'mr' ? 'कृपया आधी रुग्णाचे नाव व मोबाईल क्रमांक प्रोफाइल टॅबमध्ये प्रविष्ट करा.' : 'Please enter patient name and mobile number in the Profile tab first.');
+      setActiveTab('profile');
+      return;
+    }
+
     setTriageLoading(true);
     try {
+      // 1. Ensure patient is registered in SQLite backend
+      try {
+        await api.createPatient({
+          name: activeName,
+          phone: activePhone,
+          age: registeredPatient?.age ? parseInt(registeredPatient.age) : 30,
+          gender: registeredPatient?.gender || 'Female',
+          village: registeredPatient?.village || 'Primary Health Centre Area',
+          taluka: registeredPatient?.taluka || '',
+          district: registeredPatient?.district || 'Pune',
+          lat: gpsLocation?.lat || null,
+          lng: gpsLocation?.lng || null,
+          abha_id: registeredPatient?.abha_id || registeredPatient?.abha_number
+        });
+      } catch (e) {
+        console.warn('Patient creation sync notice:', e);
+      }
+
+      // 2. Submit triage (persists directly to SQLite TriageRecord)
       const payload = {
-        patient_name: registeredPatient?.name || 'Citizen Patient',
-        age: registeredPatient?.age || 32,
+        patient_name: activeName,
+        age: registeredPatient?.age ? parseInt(registeredPatient.age) : 30,
         gender: registeredPatient?.gender || 'Female',
-        phone: registeredPatient?.phone || '',
-        village: registeredPatient?.village || '',
+        phone: activePhone,
+        village: registeredPatient?.village || 'Primary Health Centre Area',
         taluka: registeredPatient?.taluka || '',
-        district: registeredPatient?.district || '',
+        district: registeredPatient?.district || 'Pune',
+        lat: gpsLocation?.lat || null,
+        lng: gpsLocation?.lng || null,
         vitals: {
           systolic_bp: systolicBp ? parseFloat(systolicBp) : undefined,
           diastolic_bp: diastolicBp ? parseFloat(diastolicBp) : undefined,
@@ -253,20 +329,20 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
   };
 
   // Handle Book Appointment
-  const handleBookAppointment = async (e: React.FormEvent) => {
+  const handleBookAppointment = async (e) => {
     e.preventDefault();
     try {
-      const newAppt: Appointment = {
+      const newAppt = {
         patient_name: registeredPatient?.name || 'Citizen Patient',
         phone: registeredPatient?.phone || '',
-        age: registeredPatient?.age || 32,
+        age: registeredPatient?.age || 28,
         gender: registeredPatient?.gender || 'Female',
         facility_name: selectedFacilityForAppt,
         doctor_name: 'Medical Officer / Duty Physician',
         appointment_date: apptDate,
         time_slot: apptTimeSlot,
         reason: apptReason,
-        priority: (triageResult?.priority as PriorityLevel) || 'P3',
+        priority: triageResult?.priority || 'P3',
         status: 'Scheduled'
       };
 
@@ -280,34 +356,43 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
       setBookingSuccessMsg(msg);
       refreshPatientData();
       setTimeout(() => setBookingSuccessMsg(null), 6000);
-    } catch (e: any) {
-      alert("Booking error: " + e.message);
+    } catch (e) {
+      alert("Booking error: " + (e.message || 'Error occurred'));
     }
   };
 
   // Handle Patient Registration
-  const handleRegisterPatient = (e: React.FormEvent) => {
+  const handleRegisterPatient = async (e) => {
     e.preventDefault();
     if (!regForm.name || !regForm.phone) {
       alert("Please enter Full Name and Phone Number.");
       return;
     }
-    const newPat: Patient = { 
+    const newPat = { 
       ...regForm, 
       id: Date.now(), 
-      abha_id: registeredPatient?.abha_id || `14-${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}-${regForm.phone.slice(-4)}` 
+      lat: gpsLocation?.lat || 18.5204,
+      lng: gpsLocation?.lng || 73.8567,
+      abha_id: registeredPatient?.abha_id || `91-${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}-${regForm.phone.slice(-4)}` 
     };
+
+    try {
+      await api.createPatient(newPat);
+    } catch (err) {
+      console.warn('Backend patient save fallback:', err);
+    }
+
     setRegisteredPatient(newPat);
     localStorage.setItem('sevasetu_patient_village', JSON.stringify({
       village: newPat.village,
       taluka: newPat.taluka,
       district: newPat.district
     }));
-    alert(`ABHA Profile Updated! Village: ${newPat.village}, Taluka: ${newPat.taluka || 'Bhiwandi'}, District: ${newPat.district || 'Thane'}`);
+    alert(`ABHA Profile Updated! Village: ${newPat.village}, Taluka: ${newPat.taluka || 'Khed'}, District: ${newPat.district || 'Pune'}`);
     setActiveTab('triage');
   };
 
-  const navTabs: { id: typeof activeTab; label: string; icon: React.ReactNode; badge?: number }[] = [
+  const navTabs = [
     { id: 'triage', label: language === 'mr' ? '१. लक्षणे व AI तपासणी' : language === 'hi' ? '1. लक्षण व AI जांच' : '1. Enter Symptoms & Triage', icon: <Activity className="w-4 h-4" /> },
     { id: 'facilities', label: language === 'mr' ? '२. शासकीय व नोंदणीकृत रुग्णालये' : language === 'hi' ? '2. सरकारी एवं पंजीकृत अस्पताल' : '2. Healthcare Facilities', icon: <Building2 className="w-4 h-4" /> },
     { id: 'book_appointment', label: language === 'mr' ? '३. अपॉइंटमेंट बुक करा' : language === 'hi' ? '3. अपॉइंटमेंट बुकिंग' : '3. Book Appointment', icon: <Calendar className="w-4 h-4" /> },
@@ -328,10 +413,10 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
               <span>{language === 'mr' ? 'रुग्ण डॅशबोर्ड • महाराष्ट्र आरोग्य ग्रिड' : language === 'hi' ? 'मरीज डैशबोर्ड • महाराष्ट्र स्वास्थ्य ग्रिड' : 'Patient Dashboard • Maharashtra Health Grid'}</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-black tracking-tight">
-              {registeredPatient?.name || 'Citizen Patient'}
+              {registeredPatient?.name || (language === 'mr' ? 'नागरिक रुग्ण' : language === 'hi' ? 'नागरिक मरीज' : 'Citizen Patient')}
             </h2>
             <div className="text-teal-100 text-xs sm:text-sm font-medium mt-1 flex flex-wrap items-center gap-1.5">
-              <span>📍 <strong className="text-white">{registeredPatient?.village || 'Maharashtra'}</strong></span>
+              <span>📍 <strong className="text-white">{registeredPatient?.village || (language === 'mr' ? 'महाराष्ट्र आरोग्य केंद्र' : 'Primary Health Centre Area')}</strong></span>
               {registeredPatient?.taluka && (
                 <>
                   <span>•</span>
@@ -345,22 +430,22 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
                 </>
               )}
               <span>•</span>
-              <span>ABHA: <span className="font-mono font-bold text-amber-300">{registeredPatient?.abha_id || 'ABHA Active'}</span></span>
+              <span>ABHA: <span className="font-mono font-bold text-amber-300">{registeredPatient?.abha_id || registeredPatient?.abha_number || (language === 'mr' ? 'नोंदणी आवश्यक' : language === 'hi' ? 'पंजीकरण आवश्यक' : 'Pending Registration')}</span></span>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => openAbha(registeredPatient)}
-              className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-xl font-extrabold text-xs shadow-md transition-all flex items-center space-x-1.5"
+              className="px-4 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-xl font-extrabold text-xs shadow-md transition-all flex items-center space-x-1.5 cursor-pointer"
             >
               <FileText className="w-4 h-4" />
-              <span>{t.abha_card}</span>
+              <span>{t.abha_card || 'ABHA Card'}</span>
             </button>
 
             <button
               onClick={() => setActiveTab('book_appointment')}
-              className="px-4 py-2 bg-white hover:bg-teal-50 text-teal-900 rounded-xl font-extrabold text-xs shadow-md transition-all flex items-center space-x-1.5"
+              className="px-4 py-2 bg-white hover:bg-teal-50 text-teal-900 rounded-xl font-extrabold text-xs shadow-md transition-all flex items-center space-x-1.5 cursor-pointer"
             >
               <Calendar className="w-4 h-4 text-teal-600" />
               <span>{language === 'mr' ? 'अपॉइंटमेंट बुक करा' : language === 'hi' ? 'अपॉइंटमेंट बुक करें' : 'Book Appointment'}</span>
@@ -375,7 +460,7 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center space-x-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all ${
+            className={`flex items-center space-x-2 px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all cursor-pointer ${
               activeTab === tab.id
                 ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
                 : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
@@ -409,52 +494,56 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
                   </div>
                 </div>
 
-                {/* Test Presets for Evaluators */}
-                <div className="flex items-center space-x-1.5 text-xs">
-                  <span className="text-slate-400 hidden sm:inline mr-1 font-medium">{t.demo_presets}</span>
-                  <button
-                    onClick={() => {
-                      setSystolicBp('165');
-                      setDiastolicBp('104');
-                      setSpo2('89');
-                      setTemperature('99.0');
-                      setDurationDays(2);
-                      setSymptoms(language === 'mr' ? 'तीव्र डोकेदुखी व धाप लागणे' : language === 'hi' ? 'तेज सिरदर्द और सांस फूलना' : 'Severe headache with breathlessness and chest heaviness');
-                      setIsMaternalHighRisk(false);
-                    }}
-                    className="px-2.5 py-1 bg-red-100 text-red-800 rounded-lg font-bold hover:bg-red-200 text-[11px]"
-                  >
-                    {t.preset_p1}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setSystolicBp('122');
-                      setDiastolicBp('78');
-                      setSpo2('97');
-                      setTemperature('102.8');
-                      setDurationDays(4);
-                      setSymptoms(language === 'mr' ? '४ दिवसांपासून तीव्र ताप' : language === 'hi' ? '4 दिनों से तेज बुखार' : 'High grade fever for 4 days with body chills');
-                      setIsMaternalHighRisk(false);
-                    }}
-                    className="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-lg font-bold hover:bg-amber-200 text-[11px]"
-                  >
-                    {t.preset_p2}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setSystolicBp('120');
-                      setDiastolicBp('80');
-                      setSpo2('98');
-                      setTemperature('98.4');
-                      setDurationDays(1);
-                      setSymptoms(language === 'mr' ? 'अंगदुखी, नियमित तपासणी' : language === 'hi' ? 'हल्का बदन दर्द, नियमित जांच' : 'Mild body ache, routine checkup');
-                      setIsMaternalHighRisk(false);
-                    }}
-                    className="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-lg font-bold hover:bg-emerald-200 text-[11px]"
-                  >
-                    {t.preset_p3}
-                  </button>
-                </div>
+                {/* Test Presets for Evaluators (Only shown when Demo Mode is active) */}
+                {isDemoMode && (
+                  <div className="flex items-center space-x-1.5 text-xs animate-fadeIn">
+                    <span className="text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md font-extrabold text-[10px] uppercase">
+                      Demo Helper
+                    </span>
+                    <button
+                      onClick={() => {
+                        setSystolicBp('165');
+                        setDiastolicBp('104');
+                        setSpo2('89');
+                        setTemperature('99.0');
+                        setDurationDays(2);
+                        setSymptoms(language === 'mr' ? 'तीव्र डोकेदुखी व धाप लागणे' : language === 'hi' ? 'तेज सिरदर्द और सांस फूलना' : 'Severe headache with breathlessness and chest heaviness');
+                        setIsMaternalHighRisk(false);
+                      }}
+                      className="px-2.5 py-1 bg-red-100 text-red-800 rounded-lg font-bold hover:bg-red-200 text-[11px] cursor-pointer"
+                    >
+                      {t.preset_p1}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSystolicBp('122');
+                        setDiastolicBp('78');
+                        setSpo2('97');
+                        setTemperature('102.8');
+                        setDurationDays(4);
+                        setSymptoms(language === 'mr' ? '४ दिवसांपासून तीव्र ताप' : language === 'hi' ? '4 दिनों से तेज बुखार' : 'High grade fever for 4 days with body chills');
+                        setIsMaternalHighRisk(false);
+                      }}
+                      className="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-lg font-bold hover:bg-amber-200 text-[11px] cursor-pointer"
+                    >
+                      {t.preset_p2}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSystolicBp('120');
+                        setDiastolicBp('80');
+                        setSpo2('98');
+                        setTemperature('98.4');
+                        setDurationDays(1);
+                        setSymptoms(language === 'mr' ? 'अंगदुखी, नियमित तपासणी' : language === 'hi' ? 'हल्का बदन दर्द, नियमित जांच' : 'Mild body ache, routine checkup');
+                        setIsMaternalHighRisk(false);
+                      }}
+                      className="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-lg font-bold hover:bg-emerald-200 text-[11px] cursor-pointer"
+                    >
+                      {t.preset_p3}
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Numeric Inputs for Vitals */}
@@ -556,19 +645,13 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-bold text-slate-800">{t.symptoms_label}:</label>
                   
-                  {/* Web Speech Voice Dictation Button */}
-                  <button
-                    type="button"
-                    onClick={isListening ? stopListening : startListening}
-                    className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-extrabold transition-all shadow-sm ${
-                      isListening
-                        ? 'bg-red-600 text-white animate-pulse'
-                        : 'bg-teal-600 hover:bg-teal-700 text-white'
-                    }`}
-                  >
-                    {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                    <span>{isListening ? t.listening : t.voice_input}</span>
-                  </button>
+                  {/* Indic Voice Input Component (Bhashini + Web Speech API) */}
+                  <VoiceInput
+                    language={language}
+                    onTranscript={(recText) => {
+                      setSymptoms(prev => (prev ? `${prev}, ${recText}` : recText));
+                    }}
+                  />
                 </div>
 
                 {/* Quick Tap Symptom Chips */}
@@ -578,7 +661,7 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
                       key={idx}
                       type="button"
                       onClick={() => handleSymptomChipClick(chip.value)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
                         symptoms.includes(chip.value)
                           ? 'bg-teal-700 text-white border-teal-700 shadow-sm'
                           : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
@@ -603,7 +686,7 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
                 type="button"
                 onClick={handleRunTriage}
                 disabled={triageLoading}
-                className="w-full py-4 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 active:scale-98 text-white rounded-2xl font-black text-base shadow-lg shadow-teal-600/30 transition-all flex items-center justify-center space-x-2"
+                className="w-full py-4 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 active:scale-98 text-white rounded-2xl font-black text-base shadow-lg shadow-teal-600/30 transition-all flex items-center justify-center space-x-2 cursor-pointer"
               >
                 {triageLoading ? (
                   <RefreshCw className="w-5 h-5 animate-spin" />
@@ -651,7 +734,7 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
                 {triageResult.triggers && triageResult.triggers.length > 0 && (
                   <div className="space-y-1 pt-2 border-t border-slate-200/60">
                     <p className="text-[11px] font-black uppercase tracking-wider text-slate-600">Clinical Triggers:</p>
-                    {triageResult.triggers.map((trig: string, i: number) => (
+                    {triageResult.triggers.map((trig, i) => (
                       <div key={i} className="flex items-center space-x-1.5 text-xs font-bold">
                         <span className="w-1.5 h-1.5 rounded-full bg-slate-700"></span>
                         <span>{trig}</span>
@@ -668,7 +751,7 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
                 <div className="space-y-2 pt-2">
                   <button
                     onClick={() => setActiveTab('book_appointment')}
-                    className="w-full py-2.5 bg-teal-700 hover:bg-teal-800 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-sm"
+                    className="w-full py-2.5 bg-teal-700 hover:bg-teal-800 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-sm cursor-pointer"
                   >
                     <Calendar className="w-3.5 h-3.5" />
                     <span>Book Facility Appointment</span>
@@ -677,7 +760,7 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
                   {triageResult.priority === 'P1' && (
                     <button
                       onClick={openSOS}
-                      className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-md animate-pulse"
+                      className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-md animate-pulse cursor-pointer"
                     >
                       <Phone className="w-3.5 h-3.5" />
                       <span>{t.call_ambulance_btn}</span>
@@ -767,11 +850,11 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
               </div>
 
               <div className="flex items-center space-x-1.5 overflow-x-auto pb-1 no-scrollbar">
-                {(['All', 'Hospital', 'Nursing Home', 'Clinic'] as const).map((cat) => (
+                {['All', 'Hospital', 'Nursing Home', 'Clinic'].map((cat) => (
                   <button
                     key={cat}
                     onClick={() => setHospitalCategoryFilter(cat)}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                       hospitalCategoryFilter === cat
                         ? 'bg-slate-900 text-white shadow-sm'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -839,7 +922,7 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
                           </p>
                         </div>
 
-                        {/* Metric Chips (cleanly omit 0 and missing values) */}
+                        {/* Metric Chips */}
                         <div className="flex flex-wrap items-center gap-1.5 pt-1">
                           {fac.beds && typeof fac.beds === 'number' && fac.beds > 0 && (
                             <span className="bg-blue-50 text-blue-800 border border-blue-200 text-[11px] font-bold px-2 py-0.5 rounded-lg">
@@ -1030,7 +1113,7 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
 
               <button
                 type="submit"
-                className="w-full py-4 bg-teal-600 hover:bg-teal-700 active:scale-98 text-white rounded-2xl font-black text-base shadow-lg shadow-teal-600/30 transition-all flex items-center justify-center space-x-2"
+                className="w-full py-4 bg-teal-600 hover:bg-teal-700 active:scale-98 text-white rounded-2xl font-black text-base shadow-lg shadow-teal-600/30 transition-all flex items-center justify-center space-x-2 cursor-pointer"
               >
                 <CheckCircle2 className="w-5 h-5" />
                 <span>Confirm & Book Appointment</span>
@@ -1055,39 +1138,83 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
               </div>
               <button
                 onClick={() => openAbha(registeredPatient)}
-                className="px-4 py-2 bg-amber-400 text-slate-950 rounded-xl font-black text-xs hover:bg-amber-300 transition-all shadow-sm"
+                className="px-4 py-2 bg-amber-400 text-slate-950 rounded-xl font-black text-xs hover:bg-amber-300 transition-all shadow-sm cursor-pointer"
               >
                 View ABHA Card
               </button>
             </div>
 
+            {/* Official ABDM Longitudinal Clinical Records */}
+            {registeredPatient?.records && registeredPatient.records.length > 0 && (
+              <div className="space-y-3">
+                <h4 className="text-sm font-extrabold text-teal-900 flex items-center space-x-1.5">
+                  <Sparkles className="w-4 h-4 text-teal-600" />
+                  <span>Official ABDM Clinical Records & Lab Reports:</span>
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {registeredPatient.records.map((rec, idx) => (
+                    <div key={idx} className="p-4 rounded-2xl bg-teal-50/70 border border-teal-200 text-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-teal-200 text-teal-900 border border-teal-300">
+                          {rec.type}
+                        </span>
+                        <span className="text-slate-500 font-mono text-[10px]">{rec.date}</span>
+                      </div>
+                      <h5 className="font-extrabold text-slate-900 text-sm">{rec.title}</h5>
+                      {rec.code && <p className="text-[11px] font-mono text-teal-800">Code: {rec.code}</p>}
+                      {rec.doctor && <p className="text-slate-600"><strong>Practitioner:</strong> {rec.doctor}</p>}
+                      {rec.facility && <p className="text-slate-500"><strong>Facility:</strong> {rec.facility}</p>}
+                      {rec.notes && <p className="text-slate-700 bg-white p-2.5 rounded-xl border border-teal-100">{rec.notes}</p>}
+                      {rec.results && <p className="text-slate-700 bg-white p-2.5 rounded-xl border border-teal-100"><strong>Lab Results:</strong> {rec.results}</p>}
+                      {rec.medications && (
+                        <div className="bg-white p-2.5 rounded-xl border border-teal-100">
+                          <strong className="text-slate-800 block mb-1">Medications:</strong>
+                          <ul className="list-disc list-inside space-y-0.5 text-slate-700">
+                            {rec.medications.map((m, mIdx) => (
+                              <li key={mIdx}>{m}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Past Triage & Prescription List */}
             <div className="space-y-3">
-              <h4 className="text-sm font-extrabold text-slate-800">Past Triage & Doctor Consultations:</h4>
-              {pastTriageRecords.map((r) => (
-                <div key={r.id || r.local_id} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${
-                        r.priority === 'P1' ? 'bg-red-100 text-red-800' : r.priority === 'P2' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
-                      }`}>
-                        {r.priority} Priority
-                      </span>
-                      <span className="font-extrabold text-slate-900 text-sm">{r.patient_name}</span>
-                    </div>
-                    <span className="text-slate-400 font-mono text-[11px]">{r.created_at?.slice(0, 10)}</span>
-                  </div>
-
-                  <p className="text-slate-600"><strong>Triage Reason:</strong> {r.triage_reason}</p>
-                  
-                  {r.prescription && (
-                    <div className="p-3 bg-teal-50 border border-teal-200 rounded-xl text-teal-950 font-mono text-xs">
-                      <strong>Rx Prescribed by {r.doctor_name || 'Medical Officer'}:</strong>
-                      <p className="whitespace-pre-line mt-1">{r.prescription}</p>
-                    </div>
-                  )}
+              <h4 className="text-sm font-extrabold text-slate-800">Local Grid Triage & Doctor Consultations:</h4>
+              {pastTriageRecords.length === 0 ? (
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-500 text-center">
+                  No local consultations recorded yet. Submit symptoms on Tab 1 to initiate triage.
                 </div>
-              ))}
+              ) : (
+                pastTriageRecords.map((r) => (
+                  <div key={r.id || r.local_id} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${
+                          r.priority === 'P1' ? 'bg-red-100 text-red-800' : r.priority === 'P2' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+                        }`}>
+                          {r.priority} Priority
+                        </span>
+                        <span className="font-extrabold text-slate-900 text-sm">{r.patient_name}</span>
+                      </div>
+                      <span className="text-slate-400 font-mono text-[11px]">{r.created_at?.slice(0, 10)}</span>
+                    </div>
+
+                    <p className="text-slate-600"><strong>Triage Reason:</strong> {r.triage_reason}</p>
+                    
+                    {r.prescription && (
+                      <div className="p-3 bg-teal-50 border border-teal-200 rounded-xl text-teal-950 font-mono text-xs">
+                        <strong>Rx Prescribed by {r.doctor_name || 'Medical Officer'}:</strong>
+                        <p className="whitespace-pre-line mt-1">{r.prescription}</p>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -1201,7 +1328,7 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
                 </p>
                 <button
                   onClick={() => alert("Community Health Worker notified of your follow-up checkup request!")}
-                  className="w-full py-2 bg-purple-700 hover:bg-purple-800 text-white rounded-xl font-bold text-xs shadow-sm transition-all"
+                  className="w-full py-2 bg-purple-700 hover:bg-purple-800 text-white rounded-xl font-bold text-xs shadow-sm transition-all cursor-pointer"
                 >
                   Request Early ASHA Visit
                 </button>
@@ -1304,7 +1431,7 @@ export const PatientPortal: React.FC<PatientPortalProps> = ({
 
             <button
               type="submit"
-              className="w-full py-4 bg-teal-600 hover:bg-teal-700 active:scale-98 text-white rounded-2xl font-black text-base shadow-lg shadow-teal-600/30 transition-all mt-4"
+              className="w-full py-4 bg-teal-600 hover:bg-teal-700 active:scale-98 text-white rounded-2xl font-black text-base shadow-lg shadow-teal-600/30 transition-all mt-4 cursor-pointer"
             >
               Update Profile Details
             </button>

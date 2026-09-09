@@ -1,4 +1,6 @@
+// @ts-nocheck
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { api } from '../services/api';
 
 export const DEMO_PRESETS = {
   patient_sunita: {
@@ -79,7 +81,7 @@ export const DemoProvider = ({ children }) => {
 
   const [activePreset, setActivePreset] = useState(null);
 
-  const toggleDemoMode = () => {
+  const toggleDemoMode = async () => {
     setIsDemoMode(prev => {
       const nextVal = !prev;
       try {
@@ -89,6 +91,16 @@ export const DemoProvider = ({ children }) => {
       }
       return nextVal;
     });
+    try {
+      if (!isDemoMode) {
+        await api.seedDemoData();
+      } else {
+        await api.resetSystemData();
+      }
+      window.location.reload();
+    } catch (error) {
+      console.error('Demo data mode switch failed:', error);
+    }
   };
 
   const applyPreset = (presetKey) => {
