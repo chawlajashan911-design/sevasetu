@@ -2,7 +2,7 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Supabase PostgreSQL (required — no SQLite fallback in production)
+# Supabase PostgreSQL (or connection string from environment)
 DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip('"').strip("'")
 
 if not DATABASE_URL:
@@ -11,13 +11,21 @@ if not DATABASE_URL:
         "Set it to your Supabase PostgreSQL connection string."
     )
 
-# Supabase uses PostgreSQL — no special connect_args needed
-engine = create_engine(
-    DATABASE_URL,
-    pool_pre_ping=True,       # Handles dropped connections from Supabase pooler
-    pool_recycle=300,          # Recycle connections every 5 min
-    echo=False
-)
+# Fix for SQLAlchemy 2.0 which requires postgresql:// instead of postgres://
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+engine_kwargs = {
+    "pool_pre_ping": True,
+    "echo": False,
+}
+
+if "sqlite" in DATABASE_URL:
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    engine_kwargs["pool_recycle"] = 300  # Recycle Supabase pooler connections every 5 min
+
+engine = create_engine(DATABASE_URL, **engine_kwargs)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

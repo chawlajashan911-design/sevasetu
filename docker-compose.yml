@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  sevasetu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sevasetu_app
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - DATABASE_URL=${DATABASE_URL}
+    restart: unless-stopped

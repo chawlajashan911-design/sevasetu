@@ -1,9 +1,11 @@
 import { TriageRecord, Patient, Referral, Appointment, InventoryItem, OutbreakCluster, Facility, VillageRecord } from '../types';
 import { db, saveOfflineTriage, markAsSynced } from '../db/dexie';
 
-// In production (Render Static Site), VITE_API_URL points to the backend Render URL.
+// In production (single-instance or Render), defaults to relative '/api'.
 // In local dev, falls back to '/api' which is proxied to localhost:8000 via vite.config.ts.
-const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api';
+const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) || '/api';
+
+let cachedLocalVillages: VillageRecord[] | null = null;
 
 export const api = {
   // Check backend health

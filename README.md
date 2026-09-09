@@ -72,7 +72,30 @@ npm run dev
 
 *Frontend runs at: **http://localhost:5173***
 
----
+### 4. Single-Instance Docker Deployment (Frontend + Backend Unified)
+
+Both the React frontend and FastAPI backend can run on a single unified instance using Docker:
+
+```bash
+# Build unified Docker image (multi-stage: builds React SPA, runs FastAPI)
+docker build -t sevasetu .
+
+# Run container (runs on http://localhost:8000)
+docker run -p 8000:8000 -e DATABASE_URL="postgresql://user:pass@host:port/dbname" sevasetu
+```
+
+Or using Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+### 5. Render Single-Instance Deployment
+
+This repository includes a unified `render.yaml` blueprint. Deploying with this single service combines the React SPA and FastAPI backend onto **one free/paid instance**, eliminating cross-origin latency and reducing Render quota usage:
+1. Connect repository in Render Dashboard.
+2. Render detects `render.yaml` and deploys the `sevasetu` Docker Web Service.
+3. In Render Dashboard under **Environment**, set `DATABASE_URL` to your Supabase PostgreSQL connection string.
 
 ## 🧭 Four Integrated Portals
 

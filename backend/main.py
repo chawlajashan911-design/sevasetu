@@ -7,6 +7,8 @@ load_dotenv()  # Load .env for local development
 
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, case, or_, func
 
@@ -50,9 +52,9 @@ app.add_middleware(
 )
 
 
-# ----------------- Root & Health -----------------
-@app.get("/")
-def read_root(db: Session = Depends(get_db)):
+# ----------------- API Root & Health -----------------
+@app.get("/api")
+def read_api_info(db: Session = Depends(get_db)):
     villages_count = db.query(func.count(Village.id)).scalar() or 0
     hospitals_count = len(hospital_directory.hospitals)
     return {
@@ -710,3 +712,45 @@ def create_esanjeevani_session(payload: dict):
     priority = payload.get("priority", "P1")
     facility_name = payload.get("facility_name", "Healthcare Centre")
     return ESanjeevaniService.create_teleconsult_session(patient_name, priority, facility_name)
+
+
+# ----------------- Static Files & Single Page Application (SPA) Serving -----------------
+FRONTEND_DIST = os.getenv(
+    "FRONTEND_DIST",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
+)
+
+if os.path.exists(FRONTEND_DIST):
+    assets_path = os.path.join(FRONTEND_DIST, "assets")
+    if os.path.exists(assets_path):
+        app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
+
+    @app.get("/")
+    async def serve_spa_root():
+        index_path = os.path.join(FRONTEND_DIST, "index.html")
+        if os.path.isfile(index_path):
+            return FileResponse(index_path)
+        raise HTTPException(status_code=404, detail="index.html not found")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa_fallback(full_path: str):
+        # Do not intercept /api calls; return JSON 404 for unknown API routes
+        if full_path.startswith("api/") or full_path == "api":
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+
+        # Serve static file if it exists directly in frontend/dist (e.g. favicon.ico, vite.svg)
+        target_file = os.path.join(FRONTEND_DIST, full_path)
+        if full_path and os.path.isfile(target_file):
+            return FileResponse(target_file)
+
+        # SPA client-side routing fallback: return index.html for React Router
+        index_path = os.path.join(FRONTEND_DIST, "index.html")
+        if os.path.isfile(index_path):
+            return FileResponse(index_path)
+
+        raise HTTPException(status_code=404, detail="Frontend build index.html not found")
+else:
+    @app.get("/")
+    def read_root(db: Session = Depends(get_db)):
+        return read_api_info(db)
+
