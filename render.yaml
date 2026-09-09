@@ -1,0 +1,11 @@
+services:
+  # ─── SevaSetu Unified Web Service (FastAPI + React SPA in Single Docker Container) ───
+  - type: web
+    name: sevasetu
+    env: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        sync: false   # Set this in Render dashboard → Environment (Supabase PostgreSQL connection string)

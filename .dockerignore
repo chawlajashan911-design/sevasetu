@@ -1,0 +1,45 @@
+# Version control
+.git
+.gitignore
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Python virtual environments & bytecode
+backend/venv/
+**/venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Node / Frontend artifacts
+frontend/node_modules/
+**/node_modules/
+frontend/dist/
+**/dist/
+frontend/build/
+**/build/
+npm-debug.log*
+
+# Database & SQLite files
+*.db
+*.sqlite
+*.sqlite3
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE & Editor configurations
+.vscode/
+.idea/
+*.swp
+*.swo
