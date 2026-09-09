@@ -1,7 +1,7 @@
 # SevaSetu (सेवासेतू / सेवासेतु) - Rural Healthcare AI & Tele-Care System
 
 > **"Bridging the Healthcare Divide with Compassion, Dignity, and Intelligence."**  
-> Operational Node: **Maharashtra Public Health Grid & Primary Care Network**
+> Operational Nodes: **Maharashtra Public Health Grid & Primary Care Network**
 
 ---
 
