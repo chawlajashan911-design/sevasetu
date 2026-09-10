@@ -26,7 +26,8 @@ import {
   Send,
   AlertOctagon,
   Calendar,
-  CheckCircle2
+  CheckCircle2,
+  Sparkles
 } from 'lucide-react';
 
 export const AshaPortal = ({
@@ -55,7 +56,7 @@ export const AshaPortal = ({
   const [diastolicBp, setDiastolicBp] = useState('85');
   const [spo2, setSpo2] = useState('97');
   const [temperature, setTemperature] = useState('98.6');
-  const [durationDays, setDurationDays] = useState(1);
+  const [durationDays, setDurationDays] = useState('1');
   const [symptoms, setSymptoms] = useState('');
   const [isMaternal, setIsMaternal] = useState(false);
   const [maternalNote, setMaternalNote] = useState('');
@@ -78,6 +79,7 @@ export const AshaPortal = ({
 
   // Follow-up home visit tasks state
   const [completedFollowups, setCompletedFollowups] = useState([1]);
+  const [screeningResultModal, setScreeningResultModal] = useState(null);
 
   // Update symptoms from voice
   useEffect(() => {
@@ -98,14 +100,19 @@ export const AshaPortal = ({
     }
     
     try {
-      const pats = await api.getPatients();
-      setVillagePatients(pats || []);
-      const refs = await api.getReferrals();
-      setReferrals(refs || []);
-      const inc = await api.getAshaIncentives();
-      if (inc) setIncentives(inc);
-      const tasks = await api.getAbhaFieldTasks();
-      setAbhaFieldTasks(tasks || []);
+      const [patsRes, refsRes, incRes, tasksRes] = await Promise.allSettled([
+        api.getPatients(),
+        api.getReferrals(),
+        api.getAshaIncentives(),
+        api.getAbhaFieldTasks()
+      ]);
+
+      setVillagePatients(patsRes.status === 'fulfilled' ? patsRes.value || [] : []);
+      setReferrals(refsRes.status === 'fulfilled' ? refsRes.value || [] : []);
+      if (incRes.status === 'fulfilled' && incRes.value) {
+        setIncentives(incRes.value);
+      }
+      setAbhaFieldTasks(tasksRes.status === 'fulfilled' ? tasksRes.value || [] : []);
     } catch (e) {
       console.warn('ASHA portal API data load:', e);
     }
@@ -162,11 +169,11 @@ export const AshaPortal = ({
         confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
       } catch (e) {}
 
-      const savedMsg = isOffline
-        ? `[Saved Offline] Record saved locally in Dexie database. Priority: ${result.priority} (${result.triage_label || ''}). Sync when internet is restored.`
-        : `[Saved to Server] Screening registered successfully! AI Priority: ${result.priority} (${result.triage_label || ''}).`;
-
-      alert(savedMsg);
+      setScreeningResultModal({
+        ...result,
+        patient_name: patientName || 'Citizen Patient',
+        is_offline: isOffline
+      });
 
       // Reset Form
       setPatientName('');
@@ -392,8 +399,10 @@ export const AshaPortal = ({
                   <label className="text-[11px] text-slate-500 block mb-1">Duration (Days)</label>
                   <input
                     type="number"
+                    min="1"
+                    max="90"
                     value={durationDays}
-                    onChange={(e) => setDurationDays(parseInt(e.target.value) || 1)}
+                    onChange={(e) => setDurationDays(e.target.value)}
                     className="w-full p-2 bg-white rounded-lg border border-slate-300 text-sm font-bold text-center"
                     placeholder="1"
                   />
@@ -715,6 +724,92 @@ export const AshaPortal = ({
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* AI Screening Result Modal */}
+      {screeningResultModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center space-x-2">
+                <span className={`text-xs font-black uppercase px-3 py-1 rounded-full text-white shadow-sm ${
+                  screeningResultModal.priority === 'P1' ? 'bg-red-600 animate-pulse' : screeningResultModal.priority === 'P2' ? 'bg-amber-600' : 'bg-emerald-600'
+                }`}>
+                  {screeningResultModal.priority} Priority
+                </span>
+                <span className="text-xs font-bold text-slate-500">
+                  {screeningResultModal.patient_name}
+                </span>
+              </div>
+              <button
+                onClick={() => setScreeningResultModal(null)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex items-center space-x-1.5 text-[11px] font-bold text-purple-800 bg-purple-100/80 px-2.5 py-1 rounded-xl border border-purple-200">
+              <Sparkles className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+              <span>{screeningResultModal.ai_model || 'Gemini 3.6 Flash Clinical AI'}</span>
+            </div>
+
+            {/* Differential Diagnosis */}
+            {screeningResultModal.differential_diagnosis && screeningResultModal.differential_diagnosis.length > 0 && (
+              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5">
+                <p className="text-[11px] font-black uppercase tracking-wider text-slate-700">
+                  🩺 Suspected Differential Conditions:
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {screeningResultModal.differential_diagnosis.map((diag, i) => (
+                    <span key={i} className="px-2.5 py-1 bg-white text-slate-800 text-[11px] font-bold rounded-lg border border-slate-300 shadow-xs">
+                      {diag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Clinical Reasoning */}
+            {screeningResultModal.clinical_reasoning && (
+              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-700">
+                <span className="font-bold text-slate-900 block mb-0.5">Clinical Impression:</span>
+                <p className="text-[11px] leading-relaxed text-slate-600 font-medium">{screeningResultModal.clinical_reasoning}</p>
+              </div>
+            )}
+
+            {/* Red Flag Warnings */}
+            {screeningResultModal.red_flag_warnings && screeningResultModal.red_flag_warnings.length > 0 && (
+              <div className="p-3 bg-rose-50/90 rounded-2xl border border-rose-200 text-xs text-rose-950 space-y-1">
+                <span className="font-black text-rose-900 text-[11px] uppercase tracking-wide">
+                  🚨 Danger Signs to Watch in Village:
+                </span>
+                <ul className="list-disc list-inside text-[11px] space-y-0.5 text-rose-800 font-medium">
+                  {screeningResultModal.red_flag_warnings.map((flag, i) => (
+                    <li key={i}>{flag}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Action Guidance */}
+            <div className="p-3 bg-teal-50 rounded-2xl border border-teal-200 text-xs text-teal-950 space-y-1">
+              <span className="font-bold text-teal-900 text-[11px] uppercase tracking-wide">
+                Immediate Action for ASHA Worker:
+              </span>
+              <p className="font-medium text-[11px] text-teal-800">
+                {screeningResultModal.recommended_action || (screeningResultModal.priority === 'P1' ? 'Alert 108 Emergency Ambulance immediately.' : 'Advise rest, hydration, and visit PHC OPD.')}
+              </p>
+            </div>
+
+            <button
+              onClick={() => setScreeningResultModal(null)}
+              className="w-full py-3 bg-purple-700 hover:bg-purple-800 text-white rounded-xl font-black text-xs shadow-md transition-all cursor-pointer"
+            >
+              Done / Screen Next Patient
+            </button>
+          </div>
         </div>
       )}
     </div>

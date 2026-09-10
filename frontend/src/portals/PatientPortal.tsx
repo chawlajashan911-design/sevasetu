@@ -34,7 +34,9 @@ import {
   RefreshCw,
   CheckCircle,
   HelpCircle,
-  Search
+  Search,
+  Plus,
+  Minus
 } from 'lucide-react';
 
 export const PatientPortal = ({
@@ -115,14 +117,14 @@ export const PatientPortal = ({
   const [regForm, setRegForm] = useState(getInitialPatientData);
   const [registeredPatient, setRegisteredPatient] = useState(getInitialPatientData);
 
-  // Vitals & Symptoms Form State - blank in Live Production Mode
-  const [systolicBp, setSystolicBp] = useState(() => isDemoMode ? '165' : '');
-  const [diastolicBp, setDiastolicBp] = useState(() => isDemoMode ? '105' : '');
-  const [spo2, setSpo2] = useState(() => isDemoMode ? '88' : '');
-  const [pulseRate, setPulseRate] = useState(() => isDemoMode ? '112' : '');
-  const [temperature, setTemperature] = useState(() => isDemoMode ? '101.4' : '');
-  const [durationDays, setDurationDays] = useState(1);
-  const [symptoms, setSymptoms] = useState(() => isDemoMode ? 'Continuous dry cough, Severe chest heaviness, Breathlessness' : '');
+  // Vitals & Symptoms Form State - clean state for custom testing or 1-click test scenarios
+  const [systolicBp, setSystolicBp] = useState('');
+  const [diastolicBp, setDiastolicBp] = useState('');
+  const [spo2, setSpo2] = useState('');
+  const [pulseRate, setPulseRate] = useState('');
+  const [temperature, setTemperature] = useState('');
+  const [durationDays, setDurationDays] = useState('');
+  const [symptoms, setSymptoms] = useState('');
   const [isMaternalHighRisk, setIsMaternalHighRisk] = useState(false);
   const [maternalNote, setMaternalNote] = useState('');
 
@@ -166,9 +168,12 @@ export const PatientPortal = ({
     return () => window.removeEventListener('sevasetu_apply_demo_preset', handlePreset);
   }, []);
 
-  // Triage Result State
+  // Triage Result State & Guardrail Tracking
   const [triageLoading, setTriageLoading] = useState(false);
   const [triageResult, setTriageResult] = useState(null);
+  const [lastEvaluatedFingerprint, setLastEvaluatedFingerprint] = useState(null);
+  const [triageNotice, setTriageNotice] = useState(null);
+  const [triageError, setTriageError] = useState(null);
 
   // Facilities, Referrals, Appointments, Records
   const [facilities, setFacilities] = useState([]);
@@ -188,30 +193,34 @@ export const PatientPortal = ({
   const [apptReason, setApptReason] = useState('Routine OPD Consultation & Checkup');
   const [bookingSuccessMsg, setBookingSuccessMsg] = useState(null);
 
-  // Load facilities from Government Hospital Directory (hospital_directory.csv)
+  // Load facilities from Government Hospital Directory (PostgreSQL)
   const refreshPatientData = async () => {
     try {
       setLoadingFacilities(true);
-      const facs = await api.getFacilities({
-        district: registeredPatient?.district || 'Pune',
-        taluka: registeredPatient?.taluka || undefined,
-        village: registeredPatient?.village || undefined,
-        query: hospitalSearch || undefined,
-        category: hospitalCategoryFilter !== 'All' ? hospitalCategoryFilter : undefined,
-        lat: gpsLocation?.lat,
-        lng: gpsLocation?.lng,
-        limit: 50
-      });
+      const [facsRes, refsRes, apptsRes, qRes] = await Promise.allSettled([
+        api.getFacilities({
+          district: registeredPatient?.district || 'Pune',
+          taluka: registeredPatient?.taluka || undefined,
+          village: registeredPatient?.village || undefined,
+          query: hospitalSearch || undefined,
+          category: hospitalCategoryFilter !== 'All' ? hospitalCategoryFilter : undefined,
+          lat: gpsLocation?.lat,
+          lng: gpsLocation?.lng,
+          limit: 50
+        }),
+        api.getReferrals(),
+        api.getAppointments(),
+        api.getDoctorQueue()
+      ]);
+
+      const facs = facsRes.status === 'fulfilled' ? facsRes.value : [];
       setFacilities(facs || []);
       if (facs && facs.length > 0 && !selectedFacilityForAppt) {
         setSelectedFacilityForAppt(facs[0].name);
       }
-      const refs = await api.getReferrals();
-      setReferrals(refs || []);
-      const appts = await api.getAppointments();
-      setAppointments(appts || []);
-      const q = await api.getDoctorQueue();
-      setPastTriageRecords(q || []);
+      setReferrals(refsRes.status === 'fulfilled' ? refsRes.value || [] : []);
+      setAppointments(apptsRes.status === 'fulfilled' ? apptsRes.value || [] : []);
+      setPastTriageRecords(qRes.status === 'fulfilled' ? qRes.value || [] : []);
     } catch (e) {
       console.warn('Patient portal data load:', e);
     } finally {
@@ -255,15 +264,46 @@ export const PatientPortal = ({
   ];
 
   const handleSymptomChipClick = (val) => {
-    if (symptoms.includes(val)) {
-      setSymptoms(symptoms.replace(val, '').trim());
+    const currentList = symptoms
+      ? symptoms.split(',').map(s => s.trim()).filter(Boolean)
+      : [];
+    const index = currentList.findIndex(s => s.toLowerCase() === val.toLowerCase());
+    if (index >= 0) {
+      currentList.splice(index, 1);
     } else {
-      setSymptoms(symptoms ? `${symptoms}, ${val}` : val);
+      currentList.push(val);
     }
+    setSymptoms(currentList.join(', '));
+    if (triageNotice) setTriageNotice(null);
+    if (triageError) setTriageError(null);
   };
 
-  // Run Triage
-  const handleRunTriage = async () => {
+  // Helper to step vitals: initializes from default baseline when empty, or steps from current value
+  const stepVital = (
+    currentVal,
+    setter,
+    defaultBase,
+    delta,
+    minVal = undefined,
+    maxVal = undefined,
+    isFloat = false
+  ) => {
+    let base;
+    if (currentVal === '' || currentVal === null || currentVal === undefined || isNaN(Number(currentVal))) {
+      base = defaultBase;
+    } else {
+      base = Number(currentVal);
+    }
+    let next = base + delta;
+    if (minVal !== undefined && next < minVal) next = minVal;
+    if (maxVal !== undefined && next > maxVal) next = maxVal;
+    setter(isFloat ? next.toFixed(1) : String(Math.round(next)));
+    if (triageNotice) setTriageNotice(null);
+    if (triageError) setTriageError(null);
+  };
+
+  // Run Triage with Continuous POST Guardrail
+  const handleRunTriage = async (force = false) => {
     const activeName = registeredPatient?.name || regForm?.name;
     const activePhone = registeredPatient?.phone || regForm?.phone;
 
@@ -273,28 +313,47 @@ export const PatientPortal = ({
       return;
     }
 
+    // Compute input fingerprint to prevent duplicate continuous POST requests on identical inputs
+    const currentFingerprint = `${activePhone}|${systolicBp}|${diastolicBp}|${spo2}|${pulseRate}|${temperature}|${durationDays}|${(symptoms || '').trim().toLowerCase()}|${isMaternalHighRisk}|${maternalNote}`;
+
+    if (!force && lastEvaluatedFingerprint === currentFingerprint && triageResult) {
+      setTriageNotice(language === 'mr'
+        ? 'याच लक्षणांचा निकाल आधीच उपलब्ध आहे. लक्षणे बदलल्यास पुन्हा तपासणी होईल, किंवा खालील बटण दाबून सक्तीने पुन्हा चाचणी करा.'
+        : 'Displaying current evaluation for these exact inputs. Modify symptoms or vitals to evaluate new data, or click Force Re-evaluate.');
+      return;
+    }
+
+    setTriageError(null);
+    setTriageNotice(null);
     setTriageLoading(true);
+
     try {
-      // 1. Ensure patient is registered in SQLite backend
-      try {
-        await api.createPatient({
-          name: activeName,
-          phone: activePhone,
-          age: registeredPatient?.age ? parseInt(registeredPatient.age) : 30,
-          gender: registeredPatient?.gender || 'Female',
-          village: registeredPatient?.village || 'Primary Health Centre Area',
-          taluka: registeredPatient?.taluka || '',
-          district: registeredPatient?.district || 'Pune',
-          lat: gpsLocation?.lat || null,
-          lng: gpsLocation?.lng || null,
-          abha_id: registeredPatient?.abha_id || registeredPatient?.abha_number
-        });
-      } catch (e) {
-        console.warn('Patient creation sync notice:', e);
+      // 1. Ensure patient is registered in backend (only if ID not yet known)
+      if (!registeredPatient?.id) {
+        try {
+          const pat = await api.createPatient({
+            name: activeName,
+            phone: activePhone,
+            age: registeredPatient?.age ? parseInt(registeredPatient.age) : 30,
+            gender: registeredPatient?.gender || 'Female',
+            village: registeredPatient?.village || 'Primary Health Centre Area',
+            taluka: registeredPatient?.taluka || '',
+            district: registeredPatient?.district || 'Pune',
+            lat: gpsLocation?.lat || null,
+            lng: gpsLocation?.lng || null,
+            abha_id: registeredPatient?.abha_id || registeredPatient?.abha_number
+          });
+          if (pat && pat.id) {
+            setRegisteredPatient(prev => ({ ...prev, id: pat.id }));
+          }
+        } catch (e) {
+          console.warn('Patient creation sync notice:', e);
+        }
       }
 
-      // 2. Submit triage (persists directly to SQLite TriageRecord)
+      // 2. Submit triage (persists directly to TriageRecord)
       const payload = {
+        patient_id: registeredPatient?.id || undefined,
         patient_name: activeName,
         age: registeredPatient?.age ? parseInt(registeredPatient.age) : 30,
         gender: registeredPatient?.gender || 'Female',
@@ -310,7 +369,7 @@ export const PatientPortal = ({
           spo2: spo2 ? parseFloat(spo2) : undefined,
           pulse_rate: pulseRate ? parseFloat(pulseRate) : undefined,
           temperature: temperature ? parseFloat(temperature) : undefined,
-          symptom_duration_days: durationDays,
+          symptom_duration_days: durationDays ? parseInt(durationDays) : 1,
           symptoms: symptoms,
           high_risk_maternal: isMaternalHighRisk,
           maternal_note: maternalNote
@@ -320,9 +379,16 @@ export const PatientPortal = ({
 
       const result = await api.evaluateTriage(payload, isOffline);
       setTriageResult(result);
+      setLastEvaluatedFingerprint(currentFingerprint);
+      if (result.cached) {
+        setTriageNotice(language === 'mr'
+          ? 'अचूक व जलद निकाल (६० सेकंदांत आधी नोंदवलेल्या नोंदीवरून पुनर्प्राप्त).'
+          : 'Instant cached evaluation loaded (identical inputs received within 60s).');
+      }
       refreshPatientData();
     } catch (err) {
       console.error('Triage error:', err);
+      setTriageError(err.message || 'Triage evaluation request failed. Please check your network or wait a moment.');
     } finally {
       setTriageLoading(false);
     }
@@ -494,128 +560,265 @@ export const PatientPortal = ({
                   </div>
                 </div>
 
-                {/* Test Presets for Evaluators (Only shown when Demo Mode is active) */}
-                {isDemoMode && (
-                  <div className="flex items-center space-x-1.5 text-xs animate-fadeIn">
-                    <span className="text-amber-700 bg-amber-100 px-2 py-0.5 rounded-md font-extrabold text-[10px] uppercase">
-                      Demo Helper
-                    </span>
-                    <button
-                      onClick={() => {
-                        setSystolicBp('165');
-                        setDiastolicBp('104');
-                        setSpo2('89');
-                        setTemperature('99.0');
-                        setDurationDays(2);
-                        setSymptoms(language === 'mr' ? 'तीव्र डोकेदुखी व धाप लागणे' : language === 'hi' ? 'तेज सिरदर्द और सांस फूलना' : 'Severe headache with breathlessness and chest heaviness');
-                        setIsMaternalHighRisk(false);
-                      }}
-                      className="px-2.5 py-1 bg-red-100 text-red-800 rounded-lg font-bold hover:bg-red-200 text-[11px] cursor-pointer"
-                    >
-                      {t.preset_p1}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setSystolicBp('122');
-                        setDiastolicBp('78');
-                        setSpo2('97');
-                        setTemperature('102.8');
-                        setDurationDays(4);
-                        setSymptoms(language === 'mr' ? '४ दिवसांपासून तीव्र ताप' : language === 'hi' ? '4 दिनों से तेज बुखार' : 'High grade fever for 4 days with body chills');
-                        setIsMaternalHighRisk(false);
-                      }}
-                      className="px-2.5 py-1 bg-amber-100 text-amber-800 rounded-lg font-bold hover:bg-amber-200 text-[11px] cursor-pointer"
-                    >
-                      {t.preset_p2}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setSystolicBp('120');
-                        setDiastolicBp('80');
-                        setSpo2('98');
-                        setTemperature('98.4');
-                        setDurationDays(1);
-                        setSymptoms(language === 'mr' ? 'अंगदुखी, नियमित तपासणी' : language === 'hi' ? 'हल्का बदन दर्द, नियमित जांच' : 'Mild body ache, routine checkup');
-                        setIsMaternalHighRisk(false);
-                      }}
-                      className="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-lg font-bold hover:bg-emerald-200 text-[11px] cursor-pointer"
-                    >
-                      {t.preset_p3}
-                    </button>
-                  </div>
-                )}
+                {/* Quick Test Scenarios for P1 / P2 / P3 Segregation Testing */}
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  <span className="text-slate-700 bg-slate-200 px-2 py-0.5 rounded-md font-extrabold text-[10px] uppercase">
+                    Test Scenarios
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSystolicBp('170');
+                      setDiastolicBp('105');
+                      setSpo2('88');
+                      setPulseRate('110');
+                      setTemperature('99.0');
+                      setDurationDays('1');
+                      setSymptoms(language === 'mr' ? 'छातीत तीव्र कळ येत आहे आणि डावा हात दुखत आहे' : language === 'hi' ? 'सीने में असहनीय दर्द और बायां हाथ दुख रहा है' : 'Severe crushing chest pain radiating to left arm and cold sweat');
+                      setIsMaternalHighRisk(false);
+                      setMaternalNote('');
+                      if (triageNotice) setTriageNotice(null);
+                      if (triageError) setTriageError(null);
+                    }}
+                    className="px-2.5 py-1 bg-red-100 text-red-800 hover:bg-red-200 rounded-lg font-black text-[11px] cursor-pointer border border-red-200 shadow-xs"
+                    title="Loads P1 Critical Vitals & Symptoms"
+                  >
+                    🔴 P1 Critical
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSystolicBp('120');
+                      setDiastolicBp('80');
+                      setSpo2('97');
+                      setPulseRate('96');
+                      setTemperature('103.2');
+                      setDurationDays('4');
+                      setSymptoms(language === 'mr' ? '४ दिवसांपासून तीव्र ताप, थंडी वाजणे व उलट्या' : language === 'hi' ? '4 दिनों से तेज बुखार, कपकपी और उल्टी' : 'High grade fever for 4 days with severe chills and persistent vomiting');
+                      setIsMaternalHighRisk(false);
+                      setMaternalNote('');
+                      if (triageNotice) setTriageNotice(null);
+                      if (triageError) setTriageError(null);
+                    }}
+                    className="px-2.5 py-1 bg-amber-100 text-amber-800 hover:bg-amber-200 rounded-lg font-black text-[11px] cursor-pointer border border-amber-200 shadow-xs"
+                    title="Loads P2 Urgent Vitals & Symptoms (>3 days, >102°F)"
+                  >
+                    🟡 P2 Urgent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSystolicBp('120');
+                      setDiastolicBp('80');
+                      setSpo2('98');
+                      setPulseRate('72');
+                      setTemperature('98.4');
+                      setDurationDays('1');
+                      setSymptoms(language === 'mr' ? 'हलकी सर्दी आणि शिंका, नियमित तपासणी' : language === 'hi' ? 'हल्की सर्दी और छींक, सामान्य जांच' : 'Mild runny nose and sneezing since morning');
+                      setIsMaternalHighRisk(false);
+                      setMaternalNote('');
+                      if (triageNotice) setTriageNotice(null);
+                      if (triageError) setTriageError(null);
+                    }}
+                    className="px-2.5 py-1 bg-emerald-100 text-emerald-800 hover:bg-emerald-200 rounded-lg font-black text-[11px] cursor-pointer border border-emerald-200 shadow-xs"
+                    title="Loads P3 Routine Normal Vitals & Mild Cold"
+                  >
+                    🟢 P3 Routine
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSystolicBp('');
+                      setDiastolicBp('');
+                      setSpo2('');
+                      setPulseRate('');
+                      setTemperature('');
+                      setDurationDays('');
+                      setSymptoms('');
+                      setIsMaternalHighRisk(false);
+                      setMaternalNote('');
+                      setTriageResult(null);
+                      setTriageNotice(null);
+                      setTriageError(null);
+                    }}
+                    className="px-2.5 py-1 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg font-bold text-[11px] cursor-pointer border border-slate-300"
+                    title="Clears all inputs and reset triage state"
+                  >
+                    🔄 Clear All
+                  </button>
+                </div>
               </div>
 
-              {/* Numeric Inputs for Vitals */}
+              {/* Numeric Inputs for Vitals with Large Tactile Steppers */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* 1. Systolic BP */}
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 hover:border-teal-400 transition-all">
-                  <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center justify-between mb-2">
                     <label className="text-xs font-bold text-slate-700">{t.bp_sys}</label>
                     <span className="text-[11px] font-bold text-slate-400">&ge; 160: P1</span>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <input
-                      type="number"
-                      value={systolicBp}
-                      onChange={(e) => setSystolicBp(e.target.value)}
-                      className="w-full text-2xl font-black text-slate-900 bg-white p-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none text-center"
-                      placeholder="120"
-                    />
-                    <span className="text-xs font-bold text-slate-500">mmHg</span>
+                    <button
+                      type="button"
+                      onClick={() => stepVital(systolicBp, setSystolicBp, 120, -1, 60, 260)}
+                      className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white hover:bg-teal-600 hover:text-white text-slate-700 border border-slate-300 shadow-xs flex items-center justify-center transition-all active:scale-95 cursor-pointer shrink-0 select-none"
+                      title="Decrease Systolic BP"
+                    >
+                      <Minus className="w-5 h-5 stroke-[2.5]" />
+                    </button>
+                    <div className="relative flex-1">
+                      <input
+                        type="number"
+                        value={systolicBp}
+                        onChange={(e) => {
+                          setSystolicBp(e.target.value);
+                          if (triageNotice) setTriageNotice(null);
+                          if (triageError) setTriageError(null);
+                        }}
+                        className="w-full text-2xl font-black text-slate-900 bg-white py-2.5 px-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        placeholder="120"
+                      />
+                      <span className="absolute right-2.5 bottom-1 text-[10px] font-bold text-slate-400 pointer-events-none">
+                        mmHg
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => stepVital(systolicBp, setSystolicBp, 120, 1, 60, 260)}
+                      className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white hover:bg-teal-600 hover:text-white text-slate-700 border border-slate-300 shadow-xs flex items-center justify-center transition-all active:scale-95 cursor-pointer shrink-0 select-none"
+                      title="Increase Systolic BP"
+                    >
+                      <Plus className="w-5 h-5 stroke-[2.5]" />
+                    </button>
                   </div>
                 </div>
 
+                {/* 2. SpO2 */}
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 hover:border-teal-400 transition-all">
-                  <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center justify-between mb-2">
                     <label className="text-xs font-bold text-slate-700">{t.spo2}</label>
                     <span className="text-[11px] font-bold text-slate-400">&le; 90%: P1</span>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <input
-                      type="number"
-                      value={spo2}
-                      onChange={(e) => setSpo2(e.target.value)}
-                      className="w-full text-2xl font-black text-slate-900 bg-white p-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none text-center"
-                      placeholder="98"
-                    />
-                    <span className="text-xs font-bold text-slate-500">%</span>
+                    <button
+                      type="button"
+                      onClick={() => stepVital(spo2, setSpo2, 98, -1, 50, 100)}
+                      className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white hover:bg-teal-600 hover:text-white text-slate-700 border border-slate-300 shadow-xs flex items-center justify-center transition-all active:scale-95 cursor-pointer shrink-0 select-none"
+                      title="Decrease SpO2"
+                    >
+                      <Minus className="w-5 h-5 stroke-[2.5]" />
+                    </button>
+                    <div className="relative flex-1">
+                      <input
+                        type="number"
+                        value={spo2}
+                        onChange={(e) => {
+                          setSpo2(e.target.value);
+                          if (triageNotice) setTriageNotice(null);
+                          if (triageError) setTriageError(null);
+                        }}
+                        className="w-full text-2xl font-black text-slate-900 bg-white py-2.5 px-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        placeholder="98"
+                      />
+                      <span className="absolute right-2.5 bottom-1 text-[10px] font-bold text-slate-400 pointer-events-none">
+                        %
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => stepVital(spo2, setSpo2, 98, 1, 50, 100)}
+                      className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white hover:bg-teal-600 hover:text-white text-slate-700 border border-slate-300 shadow-xs flex items-center justify-center transition-all active:scale-95 cursor-pointer shrink-0 select-none"
+                      title="Increase SpO2"
+                    >
+                      <Plus className="w-5 h-5 stroke-[2.5]" />
+                    </button>
                   </div>
                 </div>
 
+                {/* 3. Temperature */}
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 hover:border-teal-400 transition-all">
-                  <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center justify-between mb-2">
                     <label className="text-xs font-bold text-slate-700">{t.temp}</label>
                     <span className="text-[11px] font-bold text-slate-400">&ge; 102°F: P2</span>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={temperature}
-                      onChange={(e) => setTemperature(e.target.value)}
-                      className="w-full text-2xl font-black text-slate-900 bg-white p-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none text-center"
-                      placeholder="98.6"
-                    />
-                    <span className="text-xs font-bold text-slate-500">°F</span>
+                    <button
+                      type="button"
+                      onClick={() => stepVital(temperature, setTemperature, 98.6, -0.2, 94.0, 108.0, true)}
+                      className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white hover:bg-teal-600 hover:text-white text-slate-700 border border-slate-300 shadow-xs flex items-center justify-center transition-all active:scale-95 cursor-pointer shrink-0 select-none"
+                      title="Decrease Temperature"
+                    >
+                      <Minus className="w-5 h-5 stroke-[2.5]" />
+                    </button>
+                    <div className="relative flex-1">
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={temperature}
+                        onChange={(e) => {
+                          setTemperature(e.target.value);
+                          if (triageNotice) setTriageNotice(null);
+                          if (triageError) setTriageError(null);
+                        }}
+                        className="w-full text-2xl font-black text-slate-900 bg-white py-2.5 px-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        placeholder="98.6"
+                      />
+                      <span className="absolute right-2.5 bottom-1 text-[10px] font-bold text-slate-400 pointer-events-none">
+                        °F
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => stepVital(temperature, setTemperature, 98.6, 0.2, 94.0, 108.0, true)}
+                      className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white hover:bg-teal-600 hover:text-white text-slate-700 border border-slate-300 shadow-xs flex items-center justify-center transition-all active:scale-95 cursor-pointer shrink-0 select-none"
+                      title="Increase Temperature"
+                    >
+                      <Plus className="w-5 h-5 stroke-[2.5]" />
+                    </button>
                   </div>
                 </div>
 
+                {/* 4. Duration Days */}
                 <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 hover:border-teal-400 transition-all">
-                  <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center justify-between mb-2">
                     <label className="text-xs font-bold text-slate-700">{t.duration_days}</label>
                     <span className="text-[11px] font-bold text-slate-400">&gt; 3: P2</span>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <input
-                      type="number"
-                      value={durationDays}
-                      onChange={(e) => setDurationDays(parseInt(e.target.value) || 1)}
-                      className="w-full text-2xl font-black text-slate-900 bg-white p-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none text-center"
-                      placeholder="1"
-                    />
-                    <span className="text-xs font-bold text-slate-500">
-                      {language === 'mr' ? 'दिवस' : language === 'hi' ? 'दिन' : 'Days'}
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => stepVital(durationDays, setDurationDays, 1, -1, 1, 90)}
+                      className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white hover:bg-teal-600 hover:text-white text-slate-700 border border-slate-300 shadow-xs flex items-center justify-center transition-all active:scale-95 cursor-pointer shrink-0 select-none"
+                      title="Decrease Days"
+                    >
+                      <Minus className="w-5 h-5 stroke-[2.5]" />
+                    </button>
+                    <div className="relative flex-1">
+                      <input
+                        type="number"
+                        min="1"
+                        max="90"
+                        value={durationDays}
+                        onChange={(e) => {
+                          setDurationDays(e.target.value);
+                          if (triageNotice) setTriageNotice(null);
+                          if (triageError) setTriageError(null);
+                        }}
+                        className="w-full text-2xl font-black text-slate-900 bg-white py-2.5 px-3 rounded-xl border border-slate-300 focus:ring-2 focus:ring-teal-500 outline-none text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        placeholder="1"
+                      />
+                      <span className="absolute right-2.5 bottom-1 text-[10px] font-bold text-slate-400 pointer-events-none">
+                        {language === 'mr' ? 'दिवस' : language === 'hi' ? 'दिन' : 'Days'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => stepVital(durationDays, setDurationDays, 1, 1, 1, 90)}
+                      className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-white hover:bg-teal-600 hover:text-white text-slate-700 border border-slate-300 shadow-xs flex items-center justify-center transition-all active:scale-95 cursor-pointer shrink-0 select-none"
+                      title="Increase Days"
+                    >
+                      <Plus className="w-5 h-5 stroke-[2.5]" />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -655,27 +858,56 @@ export const PatientPortal = ({
                 </div>
 
                 {/* Quick Tap Symptom Chips */}
-                <div className="flex flex-wrap gap-2">
-                  {symptomChips.map((chip, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => handleSymptomChipClick(chip.value)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
-                        symptoms.includes(chip.value)
-                          ? 'bg-teal-700 text-white border-teal-700 shadow-sm'
-                          : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-                      }`}
-                    >
-                      + {chip.label}
-                    </button>
-                  ))}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-700">
+                      {language === 'mr' ? 'लक्षणे निवडा (Quick Tap):' : language === 'hi' ? 'लक्षण चुनें (Quick Tap):' : 'Quick Tap Symptoms:'}
+                    </span>
+                    {symptoms && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSymptoms('');
+                          if (triageNotice) setTriageNotice(null);
+                          if (triageError) setTriageError(null);
+                        }}
+                        className="text-[11px] font-bold text-slate-500 hover:text-red-600 cursor-pointer"
+                      >
+                        ✕ {language === 'mr' ? 'लक्षणे हटवा' : language === 'hi' ? 'लक्षण हटाएं' : 'Clear Symptoms'}
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {symptomChips.map((chip, idx) => {
+                      const isSelected = symptoms
+                        ? symptoms.split(',').map(s => s.trim().toLowerCase()).includes(chip.value.toLowerCase())
+                        : false;
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => handleSymptomChipClick(chip.value)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
+                            isSelected
+                              ? 'bg-teal-700 text-white border-teal-700 shadow-sm'
+                              : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                          }`}
+                        >
+                          {isSelected ? '✓' : '+'} {chip.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 <textarea
                   rows={3}
                   value={symptoms}
-                  onChange={(e) => setSymptoms(e.target.value)}
+                  onChange={(e) => {
+                    setSymptoms(e.target.value);
+                    if (triageNotice) setTriageNotice(null);
+                    if (triageError) setTriageError(null);
+                  }}
                   className="w-full p-4 rounded-2xl border border-slate-300 text-sm font-medium focus:ring-2 focus:ring-teal-500 outline-none"
                   placeholder={language === 'mr' ? 'उदा. ताप, खोकला, छातीत दुखणे...' : language === 'hi' ? 'उदा. बुखार, खांसी, सीने में दर्द...' : 'Describe symptoms or use voice dictation...'}
                 />
@@ -684,12 +916,15 @@ export const PatientPortal = ({
               {/* Run Triage Button */}
               <button
                 type="button"
-                onClick={handleRunTriage}
+                onClick={() => handleRunTriage(false)}
                 disabled={triageLoading}
-                className="w-full py-4 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 active:scale-98 text-white rounded-2xl font-black text-base shadow-lg shadow-teal-600/30 transition-all flex items-center justify-center space-x-2 cursor-pointer"
+                className="w-full py-4 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 active:scale-98 text-white rounded-2xl font-black text-base shadow-lg shadow-teal-600/30 transition-all flex items-center justify-center space-x-2 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
               >
                 {triageLoading ? (
-                  <RefreshCw className="w-5 h-5 animate-spin" />
+                  <>
+                    <RefreshCw className="w-5 h-5 animate-spin" />
+                    <span>{language === 'mr' ? 'Gemini 3.6 Flash तपासणी सुरू...' : 'Analyzing with Gemini 3.6 Flash...'}</span>
+                  </>
                 ) : (
                   <>
                     <Activity className="w-5 h-5" />
@@ -702,9 +937,54 @@ export const PatientPortal = ({
           </div>
 
           {/* Triage Output Column */}
-          <div className="space-y-6">
+          <div className="space-y-4">
+            {/* Active AI Analyzing Banner */}
+            {triageLoading && (
+              <div className="p-5 rounded-3xl border-2 border-teal-500 bg-gradient-to-r from-teal-50 via-emerald-50 to-teal-50 text-teal-950 shadow-md animate-pulse space-y-2">
+                <div className="flex items-center space-x-2.5">
+                  <RefreshCw className="w-5 h-5 animate-spin text-teal-700 shrink-0" />
+                  <span className="text-sm font-black">
+                    {language === 'mr' ? 'Gemini 3.6 Flash सह नवीन लक्षणांची तपासणी सुरू आहे...' : 'Gemini 3.6 Flash is analyzing updated symptoms & vitals...'}
+                  </span>
+                </div>
+                <p className="text-xs text-teal-700 font-medium">
+                  {language === 'mr' ? 'वैद्यकीय नियमावली व लक्षणांचा ताळमेळ तपासत आहे. काही सेकंदात निकाल दिसेल.' : 'Evaluating clinical red flags, physiological triggers, and differential conditions.'}
+                </p>
+              </div>
+            )}
+
+            {/* Notice Banner for Identical Inputs / Cache */}
+            {triageNotice && (
+              <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-center justify-between gap-2 animate-fadeIn">
+                <div className="flex items-center space-x-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span className="font-semibold">{triageNotice}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleRunTriage(true)}
+                  className="px-2.5 py-1 bg-amber-200 hover:bg-amber-300 text-amber-950 font-bold rounded-lg text-[11px] shrink-0 cursor-pointer"
+                >
+                  {language === 'mr' ? 'पुन्हा तपासा' : 'Force Re-evaluate'}
+                </button>
+              </div>
+            )}
+
+            {/* User-Facing Error Banner */}
+            {triageError && (
+              <div className="p-4 rounded-2xl bg-red-50 border border-red-300 text-red-900 text-xs space-y-1.5 animate-fadeIn">
+                <div className="flex items-center space-x-2 font-bold text-red-800">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>{language === 'mr' ? 'तपासणी त्रुटी' : 'Evaluation Error'}</span>
+                </div>
+                <p className="font-medium text-red-700">{triageError}</p>
+              </div>
+            )}
+
             {triageResult ? (
-              <div className={`p-6 sm:p-7 rounded-3xl border-2 shadow-lg space-y-4 ${
+              <div className={`p-6 sm:p-7 rounded-3xl border-2 shadow-lg space-y-4 transition-opacity duration-300 ${
+                triageLoading ? 'opacity-40 pointer-events-none' : 'opacity-100'
+              } ${
                 triageResult.priority === 'P1'
                   ? 'bg-red-50/90 border-red-500 text-red-950'
                   : triageResult.priority === 'P2'
@@ -730,6 +1010,66 @@ export const PatientPortal = ({
                     {triageResult.triage_reason}
                   </p>
                 </div>
+
+                {/* AI Model Badge */}
+                <div className="flex items-center space-x-1.5 text-[11px] font-bold text-teal-800 bg-teal-100/90 px-2.5 py-1 rounded-xl border border-teal-200">
+                  <Sparkles className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                  <span>{triageResult.ai_model || 'Gemini 3.6 Flash Clinical AI'}</span>
+                </div>
+
+                {/* AI Differential Diagnosis */}
+                {triageResult.differential_diagnosis && triageResult.differential_diagnosis.length > 0 && (
+                  <div className="p-3.5 bg-white/90 rounded-2xl border border-slate-200 space-y-1.5">
+                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-700">
+                      🩺 AI Differential Impression:
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {triageResult.differential_diagnosis.map((diag, i) => (
+                        <span key={i} className="px-2.5 py-1 bg-slate-100 text-slate-800 text-[11px] font-bold rounded-lg border border-slate-300">
+                          {diag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Clinical Reasoning */}
+                {triageResult.clinical_reasoning && (
+                  <div className="p-3 bg-white/70 rounded-2xl border border-slate-200 text-xs text-slate-700">
+                    <span className="font-bold text-slate-900 block mb-0.5">Clinical Evaluation:</span>
+                    <p className="text-[11px] leading-relaxed text-slate-600 font-medium">{triageResult.clinical_reasoning}</p>
+                  </div>
+                )}
+
+                {/* Red Flag Warnings */}
+                {triageResult.red_flag_warnings && triageResult.red_flag_warnings.length > 0 && (
+                  <div className="p-3 bg-rose-50/90 rounded-2xl border border-rose-200 text-xs text-rose-950 space-y-1">
+                    <span className="font-black text-rose-900 text-[11px] uppercase tracking-wide">
+                      🚨 Danger Signs / Red Flags:
+                    </span>
+                    <ul className="list-disc list-inside text-[11px] space-y-0.5 text-rose-800 font-medium">
+                      {triageResult.red_flag_warnings.map((flag, i) => (
+                        <li key={i}>{flag}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Recommended Investigations */}
+                {triageResult.recommended_investigations && triageResult.recommended_investigations.length > 0 && (
+                  <div className="p-3 bg-blue-50/80 rounded-2xl border border-blue-200 text-xs text-blue-950 space-y-1">
+                    <span className="font-bold text-blue-900 text-[11px] uppercase tracking-wide">
+                      Recommended Investigations:
+                    </span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {triageResult.recommended_investigations.map((inv, i) => (
+                        <span key={i} className="px-2 py-0.5 bg-blue-100/90 text-blue-800 rounded-md text-[10px] font-semibold">
+                          {inv}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {triageResult.triggers && triageResult.triggers.length > 0 && (
                   <div className="space-y-1 pt-2 border-t border-slate-200/60">

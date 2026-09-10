@@ -13,4 +13,18 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    target: 'esnext',
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-icons': ['lucide-react'],
+          'vendor-storage': ['dexie'],
+          'vendor-fx': ['canvas-confetti'],
+        },
+      },
+    },
+  },
 });

@@ -51,18 +51,25 @@ export const ClinicPortal = ({
   const loadClinicData = async () => {
     setLoading(true);
     try {
-      const q = await api.getDoctorQueue();
+      const [qRes, apptsRes, patsRes, refsRes, facsRes] = await Promise.allSettled([
+        api.getDoctorQueue(),
+        api.getAppointments(),
+        api.getPatients(),
+        api.getReferrals(),
+        api.getFacilities({ limit: 40 })
+      ]);
+
+      const q = qRes.status === 'fulfilled' ? qRes.value : [];
       setQueue(q || []);
       if (q && q.length > 0 && !selectedCase) {
         setSelectedCase(q[0]);
       }
-      const appts = await api.getAppointments();
-      setAppointments(appts || []);
-      const pats = await api.getPatients();
-      setPatients(pats || []);
-      const refs = await api.getReferrals();
-      setReferrals(refs || []);
-      const facs = await api.getFacilities({ limit: 40 });
+
+      setAppointments(apptsRes.status === 'fulfilled' ? apptsRes.value || [] : []);
+      setPatients(patsRes.status === 'fulfilled' ? patsRes.value || [] : []);
+      setReferrals(refsRes.status === 'fulfilled' ? refsRes.value || [] : []);
+
+      const facs = facsRes.status === 'fulfilled' ? facsRes.value : [];
       setHospitalsList(facs || []);
       if (facs && facs.length > 0 && !targetHospital) {
         setTargetHospital(facs[0].name);

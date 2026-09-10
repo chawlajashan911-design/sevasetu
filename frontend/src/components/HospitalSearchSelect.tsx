@@ -26,26 +26,33 @@ export const HospitalSearchSelect = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Search when query changes
+  // Search when query changes with AbortController
   useEffect(() => {
     if (!query.trim()) {
       setResults([]);
       return;
     }
 
+    setLoading(true);
+    const controller = new AbortController();
+
     const timer = setTimeout(async () => {
-      setLoading(true);
       try {
-        const data = await api.searchHospitals(query, undefined, 25);
-        setResults(data);
+        const data = await api.searchHospitals(query, undefined, 25, controller.signal);
+        setResults(data || []);
       } catch (err) {
-        console.error('Hospital search error:', err);
+        if (err.name !== 'AbortError') {
+          console.error('Hospital search error:', err);
+        }
       } finally {
         setLoading(false);
       }
     }, 200);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [query]);
 
   const placeholderText = language === 'mr'

@@ -1,7 +1,8 @@
 // @ts-nocheck
 import { db, saveOfflineTriage, markAsSynced } from '../db/dexie';
 
-let cachedLocalVillages = null;
+const villageSearchCache = new Map();
+const hospitalSearchCache = new Map();
 
 // Read API URL from environment variable, fallback to /api for Vite proxy
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
@@ -245,14 +246,24 @@ export const api = {
   },
 
   // Search hospitals by name for login / selector
-  async searchHospitals(query, district = null, limit = 30) {
+  async searchHospitals(query, district = null, limit = 30, signal = null) {
+    const q = (query || '').trim();
+    if (!q) return [];
+    const cacheKey = `${q.toLowerCase()}:${district || ''}:${limit}`;
+    if (hospitalSearchCache.has(cacheKey)) {
+      return hospitalSearchCache.get(cacheKey);
+    }
     try {
-      const params = new URLSearchParams({ q: query, limit: limit.toString() });
+      const params = new URLSearchParams({ q, limit: limit.toString() });
       if (district) params.append('district', district);
-      const res = await fetch(`${API_BASE}/hospitals/search?${params.toString()}`);
+      const res = await fetch(`${API_BASE}/hospitals/search?${params.toString()}`, { signal });
       if (!res.ok) throw new Error('Hospital search failed');
-      return await res.json();
+      const data = await res.json();
+      if (hospitalSearchCache.size > 200) hospitalSearchCache.clear();
+      hospitalSearchCache.set(cacheKey, data);
+      return data;
     } catch (e) {
+      if (e.name === 'AbortError') return [];
       console.warn('Hospital search error:', e);
       return [];
     }
@@ -332,7 +343,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    if (!res.ok) throw new Error('Triage evaluation failed');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.detail || `Triage evaluation failed (${res.status})`);
+    }
     return await res.json();
   },
 
@@ -543,48 +557,29 @@ export const api = {
   },
 
   // Maharashtra Village Search (44,810 authentic villages)
-  async searchVillages(query, district, taluka, limit = 25) {
+  async searchVillages(query, district, taluka, limit = 25, signal = null) {
     const q = (query || '').trim();
     if (!q) return [];
+    const cacheKey = `${q.toLowerCase()}:${district || ''}:${taluka || ''}:${limit}`;
+    if (villageSearchCache.has(cacheKey)) {
+      return villageSearchCache.get(cacheKey);
+    }
     try {
       const params = new URLSearchParams({ q, limit: limit.toString() });
       if (district) params.append('district', district);
       if (taluka) params.append('taluka', taluka);
 
-      const res = await fetch(`${API_BASE}/villages/search?${params.toString()}`);
+      const res = await fetch(`${API_BASE}/villages/search?${params.toString()}`, { signal });
       if (res.ok) {
-        return await res.json();
+        const data = await res.json();
+        if (villageSearchCache.size > 200) villageSearchCache.clear();
+        villageSearchCache.set(cacheKey, data);
+        return data;
       }
       throw new Error('API search failed');
     } catch (err) {
-      console.warn('Falling back to local maharashtra_villages_website.json dataset search');
-      try {
-        if (!cachedLocalVillages) {
-          const fileRes = await fetch('/maharashtra_villages_website.json');
-          if (fileRes.ok) {
-            cachedLocalVillages = await fileRes.json();
-          }
-        }
-        if (cachedLocalVillages) {
-          const qLower = q.toLowerCase();
-          const matches = [];
-          for (const v of cachedLocalVillages) {
-            if (district && v.district.toLowerCase() !== district.toLowerCase()) continue;
-            if (taluka && v.taluka.toLowerCase() !== taluka.toLowerCase()) continue;
-            if (
-              v.name.toLowerCase().includes(qLower) ||
-              v.taluka.toLowerCase().includes(qLower) ||
-              v.district.toLowerCase().includes(qLower)
-            ) {
-              matches.push(v);
-              if (matches.length >= limit) break;
-            }
-          }
-          return matches;
-        }
-      } catch (fileErr) {
-        console.error('Local village dataset search error:', fileErr);
-      }
+      if (err.name === 'AbortError') return [];
+      console.warn('Village search error:', err);
       return [];
     }
   },

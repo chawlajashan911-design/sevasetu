@@ -3,20 +3,31 @@ import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { Navbar } from './components/Navbar';
 import { RoleSelectionScreen } from './components/RoleSelectionScreen';
-import { DemoLoginModal } from './components/DemoLoginModal';
-import { PatientPortal } from './portals/PatientPortal';
-import { DoctorPortal } from './portals/DoctorPortal';
-import { ClinicPortal } from './portals/ClinicPortal';
-import { HospitalPortal } from './portals/HospitalPortal';
-import { AshaPortal } from './portals/AshaPortal';
-import { AdminPortal } from './portals/AdminPortal';
-import { EmergencySOSModal } from './components/EmergencySOSModal';
-import { AbhaCardModal } from './components/AbhaCardModal';
-import { TeleconsultModal } from './components/TeleconsultModal';
 import { useGeolocation } from './hooks/useGeolocation';
 import { useNetworkStatus } from './hooks/useNetworkStatus';
 import { DemoProvider } from './context/DemoContext';
 import { DemoHeaderBar } from './components/DemoHeaderBar';
+
+// Code-split portals and modals via React.lazy for optimal initial bundle delivery
+const PatientPortal = React.lazy(() => import('./portals/PatientPortal').then(m => ({ default: m.PatientPortal })));
+const DoctorPortal = React.lazy(() => import('./portals/DoctorPortal').then(m => ({ default: m.DoctorPortal })));
+const ClinicPortal = React.lazy(() => import('./portals/ClinicPortal').then(m => ({ default: m.ClinicPortal })));
+const HospitalPortal = React.lazy(() => import('./portals/HospitalPortal').then(m => ({ default: m.HospitalPortal })));
+const AshaPortal = React.lazy(() => import('./portals/AshaPortal').then(m => ({ default: m.AshaPortal })));
+const AdminPortal = React.lazy(() => import('./portals/AdminPortal').then(m => ({ default: m.AdminPortal })));
+const DemoLoginModal = React.lazy(() => import('./components/DemoLoginModal').then(m => ({ default: m.DemoLoginModal })));
+const EmergencySOSModal = React.lazy(() => import('./components/EmergencySOSModal').then(m => ({ default: m.EmergencySOSModal })));
+const AbhaCardModal = React.lazy(() => import('./components/AbhaCardModal').then(m => ({ default: m.AbhaCardModal })));
+const TeleconsultModal = React.lazy(() => import('./components/TeleconsultModal').then(m => ({ default: m.TeleconsultModal })));
+
+const FallbackLoader = () => (
+  <div className="flex items-center justify-center min-h-[40vh] p-8 text-center text-slate-500">
+    <div className="flex flex-col items-center space-y-3">
+      <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+      <p className="text-sm font-semibold">Loading Module...</p>
+    </div>
+  </div>
+);
 
 const AppContent = () => {
   const navigate = useNavigate();
@@ -87,7 +98,8 @@ const AppContent = () => {
       {/* Global Header Bar: Demo Mode Toggle & Quick-Fill Presets */}
       <DemoHeaderBar />
 
-      <Routes>
+      <React.Suspense fallback={<FallbackLoader />}>
+        <Routes>
         {/* Route 1: Welcome & Role Selection Page */}
         <Route
           path="/"
@@ -270,6 +282,7 @@ const AppContent = () => {
         <Route path="/asha" element={<Navigate to="/health-worker" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </React.Suspense>
 
       {/* Global Footer */}
       <footer className="bg-white border-t border-slate-200 py-6 text-center text-xs text-slate-500">
@@ -287,36 +300,41 @@ const AppContent = () => {
         </div>
       </footer>
 
-      {/* Role Login Modal with ABDM Gateway & Interactive Prompt */}
-      <DemoLoginModal
-        isOpen={isLoginModalOpen}
-        onClose={() => setIsLoginModalOpen(false)}
-        role={selectedRoleForLogin}
-        language={language}
-        onLoginSuccess={handleLoginSuccess}
-      />
+      {/* Modals wrapped in lightweight Suspense */}
+      <React.Suspense fallback={null}>
+        {/* Role Login Modal with ABDM Gateway & Interactive Prompt */}
+        <DemoLoginModal
+          isOpen={isLoginModalOpen}
+          onClose={() => setIsLoginModalOpen(false)}
+          role={selectedRoleForLogin}
+          language={language}
+          onLoginSuccess={handleLoginSuccess}
+        />
 
-      {/* Modals */}
-      <EmergencySOSModal
-        isOpen={isSOSOpen}
-        onClose={() => setIsSOSOpen(false)}
-        language={language}
-        gpsLocation={geo}
-      />
+        {/* Emergency SOS Modal */}
+        <EmergencySOSModal
+          isOpen={isSOSOpen}
+          onClose={() => setIsSOSOpen(false)}
+          language={language}
+          gpsLocation={geo}
+        />
 
-      <AbhaCardModal
-        isOpen={!!selectedPatientForAbha}
-        onClose={() => setSelectedPatientForAbha(null)}
-        language={language}
-        patient={selectedPatientForAbha}
-      />
+        {/* ABHA Card Modal */}
+        <AbhaCardModal
+          isOpen={!!selectedPatientForAbha}
+          onClose={() => setSelectedPatientForAbha(null)}
+          language={language}
+          patient={selectedPatientForAbha}
+        />
 
-      <TeleconsultModal
-        isOpen={!!selectedRecordForTeleconsult}
-        onClose={() => setSelectedRecordForTeleconsult(null)}
-        language={language}
-        patientRecord={selectedRecordForTeleconsult}
-      />
+        {/* Teleconsult Modal */}
+        <TeleconsultModal
+          isOpen={!!selectedRecordForTeleconsult}
+          onClose={() => setSelectedRecordForTeleconsult(null)}
+          language={language}
+          patientRecord={selectedRecordForTeleconsult}
+        />
+      </React.Suspense>
     </div>
   );
 };

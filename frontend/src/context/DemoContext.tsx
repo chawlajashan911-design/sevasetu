@@ -82,17 +82,16 @@ export const DemoProvider = ({ children }) => {
   const [activePreset, setActivePreset] = useState(null);
 
   const toggleDemoMode = async () => {
-    setIsDemoMode(prev => {
-      const nextVal = !prev;
-      try {
-        localStorage.setItem('sevasetu_demo_mode', String(nextVal));
-      } catch (e) {
-        console.warn('LocalStorage error:', e);
-      }
-      return nextVal;
-    });
+    const nextVal = !isDemoMode;
+    setIsDemoMode(nextVal);
     try {
-      if (!isDemoMode) {
+      localStorage.setItem('sevasetu_demo_mode', String(nextVal));
+    } catch (e) {
+      console.warn('LocalStorage error:', e);
+    }
+
+    try {
+      if (nextVal) {
         await api.seedDemoData();
       } else {
         await api.resetSystemData();

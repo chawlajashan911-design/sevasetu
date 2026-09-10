@@ -114,3 +114,9 @@ class ESanjeevaniService:
             "status": "ACTIVE",
             "message": "Room session is operational"
         }
+
+    @classmethod
+    def create_teleconsult_session(cls, patient_name: str, priority: str = "P1", facility_name: str = "Healthcare Centre") -> Dict[str, Any]:
+        """Backwards-compatible wrapper for mock/legacy create_teleconsult_session calls."""
+        return cls.create_room(patient_name=patient_name, priority=priority, facility_name=facility_name)
+

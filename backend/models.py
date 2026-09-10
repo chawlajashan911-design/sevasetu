@@ -101,6 +101,9 @@ class TriageRecord(Base):
     triage_reason = Column(Text, nullable=False)
     confidence_score = Column(Float, default=0.95)
     doctor_verification_required = Column(Boolean, default=True)
+    differential_diagnosis = Column(Text, nullable=True)
+    clinical_reasoning = Column(Text, nullable=True)
+    ai_model = Column(String(80), nullable=True, default="Gemini 3.6 Flash + Clinical Rule Guardrail v2.0")
 
     # Doctor review
     doctor_verified = Column(Boolean, default=False)
@@ -198,3 +201,35 @@ class OtpSession(Base):
     is_verified = Column(Boolean, default=False)
     expires_at = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TeleconsultRoom(Base):
+    __tablename__ = "teleconsult_rooms"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(80), unique=True, index=True, nullable=False)
+    room_token = Column(String(100), nullable=True)
+    triage_id = Column(Integer, index=True, nullable=True)
+    patient_name = Column(String(100), nullable=False)
+    doctor_name = Column(String(100), nullable=True)
+    priority = Column(String(10), default="P1")
+    facility_name = Column(String(100), nullable=True)
+    jitsi_url = Column(String(255), nullable=True)
+    webrtc_channel = Column(String(100), nullable=True)
+    status = Column(String(50), default="WAITING_FOR_DOCTOR")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AbhaFieldTask(Base):
+    __tablename__ = "abha_field_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    patient_name = Column(String(100), nullable=True, default="Citizen Patient")
+    phone = Column(String(20), nullable=False, index=True)
+    village = Column(String(100), nullable=True, index=True)
+    taluka = Column(String(100), nullable=True)
+    district = Column(String(100), nullable=True)
+    reason = Column(String(255), nullable=True, default="Patient Needs ABHA Registration Field Assistance")
+    status = Column(String(50), default="Pending Assistance")
+    created_at = Column(DateTime, default=datetime.utcnow)
+

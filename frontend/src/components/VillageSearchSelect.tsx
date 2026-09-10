@@ -36,7 +36,7 @@ export const VillageSearchSelect = ({
   const talukaLabel = language === 'mr' ? 'तालुका' : language === 'hi' ? 'तालुका' : 'Taluka';
   const districtLabel = language === 'mr' ? 'जिल्हा' : language === 'hi' ? 'जिला' : 'District';
 
-  // Debounced search
+  // Debounced search with AbortController
   useEffect(() => {
     if (!searchTerm.trim() || searchTerm.trim().length < 2) {
       setResults([]);
@@ -45,18 +45,25 @@ export const VillageSearchSelect = ({
     }
 
     setIsLoading(true);
+    const controller = new AbortController();
+
     const timer = setTimeout(async () => {
       try {
-        const data = await api.searchVillages(searchTerm, undefined, undefined, 20);
-        setResults(data);
+        const data = await api.searchVillages(searchTerm, undefined, undefined, 20, controller.signal);
+        setResults(data || []);
       } catch (err) {
-        console.error('Village search failed:', err);
+        if (err.name !== 'AbortError') {
+          console.error('Village search failed:', err);
+        }
       } finally {
         setIsLoading(false);
       }
     }, 150);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [searchTerm]);
 
   // Click outside listener to close dropdown

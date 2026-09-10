@@ -190,3 +190,11 @@ class BhashiniService:
             "confidence": 0.94,
             "status": "success"
         }
+
+    @classmethod
+    def process_voice_asr(cls, duration: float = 2.5, language: str = "mr") -> Dict[str, Any]:
+        """Backwards-compatible wrapper for mock/legacy ASR calls."""
+        res = cls.speech_to_text(language=language)
+        res["duration"] = duration
+        return res
+

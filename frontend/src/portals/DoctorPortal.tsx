@@ -69,19 +69,26 @@ export const DoctorPortal = ({
   const fetchDoctorData = async () => {
     setLoading(true);
     try {
-      const records = await api.getDoctorQueue(activeFilter);
+      const [recordsRes, apptsRes, patsRes, refsRes, facsRes] = await Promise.allSettled([
+        api.getDoctorQueue(activeFilter),
+        api.getAppointments(),
+        api.getPatients(),
+        api.getReferrals(),
+        api.getFacilities({ limit: 40 })
+      ]);
+
+      const records = recordsRes.status === 'fulfilled' ? recordsRes.value : [];
       setQueue(records || []);
       if (records && records.length > 0 && !selectedRecord) {
         setSelectedRecord(records[0]);
         setVerifiedPriority(records[0].priority);
       }
-      const appts = await api.getAppointments();
-      setAppointments(appts || []);
-      const pats = await api.getPatients();
-      setPatients(pats || []);
-      const refs = await api.getReferrals();
-      setReferrals(refs || []);
-      const facs = await api.getFacilities({ limit: 40 });
+
+      setAppointments(apptsRes.status === 'fulfilled' ? apptsRes.value || [] : []);
+      setPatients(patsRes.status === 'fulfilled' ? patsRes.value || [] : []);
+      setReferrals(refsRes.status === 'fulfilled' ? refsRes.value || [] : []);
+      
+      const facs = facsRes.status === 'fulfilled' ? facsRes.value : [];
       setHospitalsList(facs || []);
       if (facs && facs.length > 0 && !referralTarget) {
         setReferralTarget(facs[0].name);
@@ -387,8 +394,53 @@ export const DoctorPortal = ({
                 {/* Patient Symptoms & Triage Reason */}
                 <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200 text-xs text-amber-950 space-y-1">
                   <p className="font-extrabold text-amber-900">Reported Symptoms & Triage Justification:</p>
-                  <p className="font-semibold">{selectedRecord.vitals?.symptoms || selectedRecord.triage_reason}</p>
+                  <p className="font-semibold">{selectedRecord.vitals?.symptoms || selectedRecord.symptoms || selectedRecord.triage_reason}</p>
                   <p className="text-slate-500 text-[11px] mt-1">Rule Engine: {selectedRecord.triage_reason}</p>
+                </div>
+
+                {/* Gemini AI Clinical Decision Support */}
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50/90 to-blue-50/90 border border-blue-200 text-xs space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-1.5 font-black text-blue-900">
+                      <Sparkles className="w-4 h-4 text-indigo-600" />
+                      <span>AI Clinical Decision Support</span>
+                    </div>
+                    <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full border border-blue-200">
+                      {selectedRecord.ai_model || 'Gemini 3.6 Flash + Safety Guardrails'}
+                    </span>
+                  </div>
+
+                  {/* Differential Diagnoses */}
+                  {selectedRecord.differential_diagnosis && selectedRecord.differential_diagnosis.length > 0 && (
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-bold text-slate-600 block">
+                        Differential Diagnoses (click to append to consultation notes):
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedRecord.differential_diagnosis.map((diag, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => {
+                              setDoctorNotes(prev => prev ? `${prev}; Suspected: ${diag}` : `Suspected: ${diag}`);
+                            }}
+                            className="px-2.5 py-1 bg-white hover:bg-blue-100 text-blue-900 border border-blue-200 rounded-lg text-xs font-semibold transition-all shadow-xs flex items-center space-x-1 cursor-pointer"
+                            title="Click to insert into Doctor Notes"
+                          >
+                            <span>+ {diag}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Clinical Reasoning */}
+                  {selectedRecord.clinical_reasoning && (
+                    <div className="text-[11px] text-slate-700 bg-white/70 p-2.5 rounded-xl border border-blue-100 leading-relaxed font-medium">
+                      <strong className="text-slate-900">AI Clinical Rationale: </strong>
+                      {selectedRecord.clinical_reasoning}
+                    </div>
+                  )}
                 </div>
 
                 {/* Consultation Notes & Verification Form */}

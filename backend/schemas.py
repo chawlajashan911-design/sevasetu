@@ -59,6 +59,12 @@ class TriageEvaluationResponse(BaseModel):
     disclaimer: str = "This is an AI triage priority score, NOT a medical diagnosis. Doctor verification required."
     triggers: List[str] = []
     recommended_action: str
+    differential_diagnosis: List[str] = []
+    clinical_reasoning: Optional[str] = None
+    red_flag_warnings: List[str] = []
+    recommended_investigations: List[str] = []
+    ai_model: Optional[str] = "Gemini 3.6 Flash + Clinical Rule Guardrail v2.0"
+    cached: Optional[bool] = False
 
 class DoctorVerificationRequest(BaseModel):
     triage_id: int

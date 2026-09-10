@@ -57,17 +57,21 @@ export const HospitalPortal = ({ language }) => {
   const loadHospitalData = async () => {
     setLoading(true);
     try {
-      const refs = await api.getReferrals();
+      const [refsRes, queueRes, patsRes, apptsRes] = await Promise.allSettled([
+        api.getReferrals(),
+        api.getDoctorQueue(),
+        api.getPatients(),
+        api.getAppointments()
+      ]);
+
+      const refs = refsRes.status === 'fulfilled' ? refsRes.value : [];
       setReferrals(refs || []);
       if (refs && refs.length > 0 && !selectedReferral) {
         setSelectedReferral(refs[0]);
       }
-      const queue = await api.getDoctorQueue();
-      setTriageQueue(queue || []);
-      const pats = await api.getPatients();
-      setPatients(pats || []);
-      const appts = await api.getAppointments();
-      setAppointments(appts || []);
+      setTriageQueue(queueRes.status === 'fulfilled' ? queueRes.value || [] : []);
+      setPatients(patsRes.status === 'fulfilled' ? patsRes.value || [] : []);
+      setAppointments(apptsRes.status === 'fulfilled' ? apptsRes.value || [] : []);
     } catch (e) {
       console.error('Hospital data fetch error:', e);
     } finally {

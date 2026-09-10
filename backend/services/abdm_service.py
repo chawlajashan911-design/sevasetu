@@ -4,6 +4,7 @@ Manages dynamic ABHA ID minting, OTP request/verification, and FHIR R4 Bundle ge
 """
 
 import os
+import json
 import uuid
 import random
 import urllib.request
@@ -395,15 +396,21 @@ class AbdmService:
                         "abha_address": f"{p.name.split()[0].lower()}.{p.phone[-4:]}@abdm"
                     }
                     # Check triage records for this patient
-                    t_records = db.query(TriageRecord).filter(TriageRecord.patient_id == p.id).all()
                     for tr in t_records:
+                        diff_text = ""
+                        if tr.differential_diagnosis:
+                            try:
+                                diffs = json.loads(tr.differential_diagnosis)
+                                diff_text = f" | AI Differential: {', '.join(diffs)}" if isinstance(diffs, list) else f" | AI Differential: {diffs}"
+                            except Exception:
+                                diff_text = f" | AI Differential: {tr.differential_diagnosis}"
                         clinical_records.append({
                             "type": "Triage Encounter",
                             "title": f"Triage Evaluation ({tr.priority})",
                             "date": tr.created_at.strftime("%Y-%m-%d") if tr.created_at else "2026-02-20",
                             "doctor": tr.doctor_name or "Medical Officer",
                             "facility": f"{tr.village or 'PHC'} Primary Healthcare Node",
-                            "notes": tr.triage_reason,
+                            "notes": f"{tr.triage_reason}{diff_text}",
                             "prescription": tr.prescription
                         })
             except Exception as e:
