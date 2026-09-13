@@ -12,6 +12,5 @@ services:
       - PORT=8000
       - DATABASE_URL=${DATABASE_URL}
     volumes:
-      - ./frontend/dist:/app/frontend/dist
       - ./backend:/app/backend
     restart: unless-stopped
