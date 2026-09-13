@@ -1,6 +1,10 @@
 import os
+from dotenv import load_dotenv, find_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
+
+# Load environment variables from nearest .env (root or backend)
+load_dotenv(find_dotenv())
 
 # Supabase PostgreSQL (or connection string from environment)
 DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip('"').strip("'")

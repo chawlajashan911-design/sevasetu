@@ -22,7 +22,7 @@ import sys
 from typing import Optional, Any
 
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), '.env'))
 
 # Must be run from repo root as: python -m backend.migrate_data
 from backend.database import engine, Base, SessionLocal

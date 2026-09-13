@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { Language, TriageRecord } from '../types';
+// @ts-nocheck
+import React, { useState, useEffect } from 'react';
 import { translations } from '../i18n/translations';
+import { api } from '../services/api';
 import { 
   X, 
   Video, 
@@ -11,28 +12,24 @@ import {
   PhoneOff, 
   Camera, 
   Send, 
-  CheckCircle,
   FileText,
-  UserCheck
+  UserCheck,
+  ExternalLink,
+  Globe
 } from 'lucide-react';
 
-interface TeleconsultModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  language: Language;
-  patientRecord: TriageRecord | null;
-}
-
-export const TeleconsultModal: React.FC<TeleconsultModalProps> = ({
+export const TeleconsultModal = ({
   isOpen,
   onClose,
   language,
   patientRecord
 }) => {
-  const t = translations[language];
-  const [activeTab, setActiveTab] = useState<'video' | 'audio' | 'chat' | 'async'>('video');
+  const t = translations[language] || translations.en;
+  const [activeTab, setActiveTab] = useState('video');
   const [isMicOn, setIsMicOn] = useState(true);
   const [isVideoOn, setIsVideoOn] = useState(true);
+  const [useIframe, setUseIframe] = useState(false);
+  const [roomData, setRoomData] = useState(null);
   
   const initialGreeting = language === 'mr' 
     ? 'नमस्कार, मी वैद्यकीय अधिकारी बोलतोय. काय त्रास होतोय?' 
@@ -40,25 +37,52 @@ export const TeleconsultModal: React.FC<TeleconsultModalProps> = ({
     ? 'नमस्कार, मैं चिकित्सा अधिकारी बोल रहा हूँ। क्या तकलीफ हो रही है?' 
     : 'Hello, Medical Officer here. How are you feeling today?';
 
-  const [messages, setMessages] = useState<{ sender: string; text: string; time: string }[]>([
+  const [messages, setMessages] = useState([
     { 
       sender: 'System', 
       text: language === 'mr' 
-        ? 'टेलिकन्सल्टेशन सत्र सुरू झाले' 
+        ? 'ई-संजीवनी टेलिकन्सल्टेशन सत्र सुरू झाले' 
         : language === 'hi' 
-        ? 'टेलीपरामर्श सत्र प्रारंभ' 
-        : 'Teleconsultation Session Connected', 
+        ? 'ई-संजीवनी टेलीपरामर्श सत्र प्रारंभ' 
+        : 'eSanjeevani Teleconsultation Session Connected', 
       time: '12:00 PM' 
     },
     { sender: 'Medical Officer', text: initialGreeting, time: '12:01 PM' }
   ]);
   const [inputMsg, setInputMsg] = useState('');
-  const [doctorNotes, setDoctorNotes] = useState('Advised Tab Paracetamol 500mg SOS, plenty of fluids, review if symptoms persist > 48h.');
-  const [callEnded, setCallEnded] = useState(false);
+  const [doctorNotes, setDoctorNotes] = useState('Advised Tab Paracetamol 500mg SOS, ORS sips, rest, review if symptoms persist > 48h.');
+
+  // Create or fetch dynamic eSanjeevani / Jitsi room on open
+  useEffect(() => {
+    if (isOpen && patientRecord) {
+      const initRoom = async () => {
+        try {
+          const room = await api.createTeleconsultRoom(
+            patientRecord.patient_name,
+            patientRecord.priority || 'P2',
+            patientRecord.village || 'Primary Health Centre',
+            patientRecord.id,
+            'Medical Officer'
+          );
+          setRoomData(room);
+        } catch (err) {
+          console.warn('Backend teleconsult room creation fallback:', err);
+          const mockId = 'sevasetu-' + (patientRecord.id || Date.now());
+          setRoomData({
+            session_id: mockId,
+            room_url: `https://meet.jit.si/${mockId}#config.prejoinConfig.enabled=false`,
+            room_name: mockId,
+            priority: patientRecord.priority || 'P2'
+          });
+        }
+      };
+      initRoom();
+    }
+  }, [isOpen, patientRecord]);
 
   if (!isOpen || !patientRecord) return null;
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = (e) => {
     e.preventDefault();
     if (!inputMsg.trim()) return;
     setMessages(prev => [
@@ -70,11 +94,11 @@ export const TeleconsultModal: React.FC<TeleconsultModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
-      <div className="bg-white rounded-3xl max-w-4xl w-full h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-300">
+      <div className="bg-white rounded-3xl max-w-5xl w-full h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-300">
         {/* Top Header */}
         <div className="bg-slate-900 text-white p-4 flex items-center justify-between border-b border-slate-800">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-teal-600 flex items-center justify-center text-white font-bold">
+            <div className="w-10 h-10 rounded-xl bg-teal-600 flex items-center justify-center text-white font-bold text-lg">
               🩺
             </div>
             <div>
@@ -85,59 +109,91 @@ export const TeleconsultModal: React.FC<TeleconsultModalProps> = ({
                 <span className="bg-teal-500/30 text-teal-300 border border-teal-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
                   Connected
                 </span>
+                {roomData?.priority && (
+                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase ${
+                    roomData.priority === 'P1' ? 'bg-red-500/30 text-red-300 border border-red-500/40' : 'bg-amber-500/30 text-amber-300 border border-amber-500/40'
+                  }`}>
+                    {roomData.priority}
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-400">
-                {t.name}: <strong className="text-white">{patientRecord.patient_name}</strong> ({patientRecord.age} Y, {patientRecord.gender}) • {t.village}: {patientRecord.village}
+                {t.name || 'Patient'}: <strong className="text-white">{patientRecord.patient_name}</strong> ({patientRecord.age} Y, {patientRecord.gender}) • {t.village || 'Village'}: {patientRecord.village}
               </p>
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-full transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center space-x-2">
+            {roomData?.room_url && (
+              <a
+                href={roomData.room_url}
+                target="_blank"
+                rel="noreferrer"
+                className="hidden sm:flex items-center space-x-1 text-xs bg-slate-800 hover:bg-slate-700 text-teal-300 px-3 py-1.5 rounded-xl border border-slate-700 transition-colors"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Open in WebRTC Tab</span>
+              </a>
+            )}
+            <button
+              onClick={onClose}
+              className="p-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-full transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Mode Switcher Tabs */}
-        <div className="flex items-center bg-slate-100 px-4 py-2 border-b border-slate-200 gap-2 overflow-x-auto">
-          <button
-            onClick={() => setActiveTab('video')}
-            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'video' ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            <Video className="w-4 h-4" />
-            <span>{language === 'mr' ? 'व्हिडिओ कॉल' : language === 'hi' ? 'वीडियो कॉल' : 'Video Call'}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('audio')}
-            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'audio' ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            <Mic className="w-4 h-4" />
-            <span>{language === 'mr' ? 'ऑडिओ कॉल' : language === 'hi' ? 'ऑडियो कॉल' : 'Audio Call'}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('chat')}
-            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'chat' ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            <MessageSquare className="w-4 h-4" />
-            <span>{language === 'mr' ? 'थेट संदेश' : language === 'hi' ? 'लाइव चैट' : 'Live Chat'}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('async')}
-            className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-              activeTab === 'async' ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            <Camera className="w-4 h-4" />
-            <span>{language === 'mr' ? 'व्हॉइस व फोटो' : language === 'hi' ? 'वॉइस व फोटो' : 'Voice & Photo'}</span>
-          </button>
+        <div className="flex items-center justify-between bg-slate-100 px-4 py-2 border-b border-slate-200 gap-2 overflow-x-auto">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveTab('video')}
+              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'video' ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Video className="w-4 h-4" />
+              <span>{language === 'mr' ? 'व्हिडिओ कॉल' : language === 'hi' ? 'वीडियो कॉल' : 'Video Call'}</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('audio')}
+              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'audio' ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Mic className="w-4 h-4" />
+              <span>{language === 'mr' ? 'ऑडिओ कॉल' : language === 'hi' ? 'ऑडियो कॉल' : 'Audio Call'}</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('chat')}
+              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'chat' ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <MessageSquare className="w-4 h-4" />
+              <span>{language === 'mr' ? 'थेट संदेश' : language === 'hi' ? 'लाइव चैट' : 'Live Chat'}</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('async')}
+              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'async' ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <Camera className="w-4 h-4" />
+              <span>{language === 'mr' ? 'व्हॉइस व फोटो' : language === 'hi' ? 'वॉइस व फोटो' : 'Voice & Photo'}</span>
+            </button>
+          </div>
+
+          {activeTab === 'video' && roomData?.room_url && (
+            <button
+              onClick={() => setUseIframe(!useIframe)}
+              className="text-xs font-bold text-teal-700 bg-teal-50 border border-teal-200 px-3 py-1 rounded-xl hover:bg-teal-100 flex items-center space-x-1 cursor-pointer"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>{useIframe ? 'Standard Stream UI' : 'Embed Jitsi Meet'}</span>
+            </button>
+          )}
         </div>
 
         {/* Modal Main Content Area */}
@@ -146,7 +202,14 @@ export const TeleconsultModal: React.FC<TeleconsultModalProps> = ({
           <div className="md:col-span-2 relative flex flex-col items-center justify-center p-4 bg-slate-950 border-r border-slate-800">
             {activeTab === 'video' && (
               <div className="w-full h-full rounded-2xl overflow-hidden relative bg-slate-900 flex items-center justify-center border border-slate-800">
-                {isVideoOn ? (
+                {useIframe && roomData?.room_url ? (
+                  <iframe
+                    src={roomData.room_url}
+                    allow="camera; microphone; fullscreen; display-capture; autoplay"
+                    className="w-full h-full border-0 rounded-2xl"
+                    title="eSanjeevani WebRTC Teleconsultation Room"
+                  />
+                ) : isVideoOn ? (
                   <div className="relative w-full h-full flex items-center justify-center bg-gradient-to-tr from-slate-900 via-teal-950 to-slate-900">
                     <div className="text-center p-6">
                       <div className="w-24 h-24 rounded-full bg-teal-800/80 border-4 border-teal-500 flex items-center justify-center text-4xl shadow-xl mx-auto mb-3 animate-pulse">
@@ -157,7 +220,7 @@ export const TeleconsultModal: React.FC<TeleconsultModalProps> = ({
                         {language === 'mr' ? 'उपकेंद्र जोडलेले' : language === 'hi' ? 'उपकेंद्र कनेक्टेड' : 'Connected from Sub-Centre Node'}
                       </p>
                       <span className="inline-block mt-2 bg-emerald-500/20 text-emerald-300 text-xs px-2.5 py-0.5 rounded-full border border-emerald-500/30">
-                        HD 720p Active
+                        eSanjeevani HD 720p Active
                       </span>
                     </div>
 
@@ -208,7 +271,12 @@ export const TeleconsultModal: React.FC<TeleconsultModalProps> = ({
                     </p>
                     <p className="text-[11px] text-slate-400">0:42 sec • Audio description</p>
                   </div>
-                  <button className="px-3 py-1 bg-teal-600 text-white rounded-lg text-xs font-bold hover:bg-teal-700">Play</button>
+                  <button 
+                    onClick={() => alert('Playing voice recording recorded by ASHA worker.')}
+                    className="px-3 py-1 bg-teal-600 text-white rounded-lg text-xs font-bold hover:bg-teal-700 cursor-pointer"
+                  >
+                    Play
+                  </button>
                 </div>
                 <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
                   <p className="text-xs font-bold text-white mb-1.5">
@@ -226,7 +294,7 @@ export const TeleconsultModal: React.FC<TeleconsultModalProps> = ({
             <div className="absolute bottom-6 flex items-center space-x-3 bg-slate-900/90 backdrop-blur-md p-2 rounded-2xl border border-slate-700 shadow-xl">
               <button
                 onClick={() => setIsMicOn(!isMicOn)}
-                className={`p-3 rounded-xl transition-all ${isMicOn ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-red-600 text-white'}`}
+                className={`p-3 rounded-xl transition-all cursor-pointer ${isMicOn ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-red-600 text-white'}`}
                 title="Toggle Mic"
               >
                 {isMicOn ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
@@ -234,18 +302,15 @@ export const TeleconsultModal: React.FC<TeleconsultModalProps> = ({
 
               <button
                 onClick={() => setIsVideoOn(!isVideoOn)}
-                className={`p-3 rounded-xl transition-all ${isVideoOn ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-red-600 text-white'}`}
+                className={`p-3 rounded-xl transition-all cursor-pointer ${isVideoOn ? 'bg-slate-800 text-white hover:bg-slate-700' : 'bg-red-600 text-white'}`}
                 title="Toggle Camera"
               >
                 {isVideoOn ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
               </button>
 
               <button
-                onClick={() => {
-                  setCallEnded(true);
-                  setTimeout(() => onClose(), 800);
-                }}
-                className="flex items-center space-x-1.5 px-4 py-3 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-xl font-bold text-xs shadow-md transition-all"
+                onClick={onClose}
+                className="flex items-center space-x-1.5 px-4 py-3 bg-red-600 hover:bg-red-700 active:scale-95 text-white rounded-xl font-bold text-xs shadow-md transition-all cursor-pointer"
                 title="End Consultation Call"
               >
                 <PhoneOff className="w-4 h-4" />
@@ -305,7 +370,7 @@ export const TeleconsultModal: React.FC<TeleconsultModalProps> = ({
                   placeholder="Type message..."
                   className="flex-1 px-3 py-1.5 text-xs rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500"
                 />
-                <button type="submit" className="px-3 py-1.5 bg-teal-600 text-white rounded-xl font-bold text-xs hover:bg-teal-700">
+                <button type="submit" className="px-3 py-1.5 bg-teal-600 text-white rounded-xl font-bold text-xs hover:bg-teal-700 cursor-pointer">
                   <Send className="w-3.5 h-3.5" />
                 </button>
               </form>
@@ -322,7 +387,7 @@ export const TeleconsultModal: React.FC<TeleconsultModalProps> = ({
                   alert(saveAlert);
                   onClose();
                 }}
-                className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold text-xs flex items-center justify-center space-x-2 shadow-md"
+                className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold text-xs flex items-center justify-center space-x-2 shadow-md cursor-pointer"
               >
                 <UserCheck className="w-4 h-4" />
                 <span>

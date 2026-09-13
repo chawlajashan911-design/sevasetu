@@ -119,18 +119,32 @@ class HospitalDirectory:
     so main.py and the frontend require zero changes.
     """
 
-    @property
-    def hospitals(self) -> List[Dict[str, Any]]:
-        """
-        Returns total count list (lightweight — only used for len() in health check).
-        Avoid calling this for search; use search() instead.
-        """
+    _cached_count: Optional[int] = None
+    _cached_count_time: float = 0.0
+
+    def get_count(self) -> int:
+        """Returns cached total hospital count from PostgreSQL."""
+        import time
+        now = time.time()
+        if HospitalDirectory._cached_count is not None and (now - HospitalDirectory._cached_count_time) < 300:
+            return HospitalDirectory._cached_count
         from .database import SessionLocal
         db: Session = SessionLocal()
         try:
-            return [{'id': h.id} for h in db.query(Hospital.id).all()]
+            cnt = db.query(func.count(Hospital.id)).scalar() or 0
+            HospitalDirectory._cached_count = cnt
+            HospitalDirectory._cached_count_time = now
+            return cnt
         finally:
             db.close()
+
+    @property
+    def hospitals(self) -> List[Any]:
+        """
+        Lightweight list for len(hospital_directory.hospitals).
+        Uses cached scalar count instead of querying all rows.
+        """
+        return [None] * self.get_count()
 
     def search(
         self,
@@ -154,6 +168,12 @@ class HospitalDirectory:
 
             if district:
                 q = q.filter(Hospital.district.ilike(f'%{district}%'))
+            elif lat is not None and lng is not None:
+                # Spatial bounding box (~1.5 deg ≈ 165 km) for fast index retrieval
+                q = q.filter(
+                    Hospital.lat.between(lat - 1.5, lat + 1.5),
+                    Hospital.lng.between(lng - 1.5, lng + 1.5)
+                )
 
             if query:
                 q = q.filter(

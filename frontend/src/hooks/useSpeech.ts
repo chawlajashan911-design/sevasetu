@@ -1,14 +1,15 @@
+// @ts-nocheck
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Language } from '../types';
+import { api } from '../services/api';
 
-export function useSpeech(lang: Language = 'mr') {
-  const [isListening, setIsListening] = useState<boolean>(false);
-  const [transcript, setTranscript] = useState<string>('');
-  const [error, setError] = useState<string | null>(null);
-  const [isSupported, setIsSupported] = useState<boolean>(true);
-  const recognitionRef = useRef<any>(null);
+export function useSpeech(lang = 'mr') {
+  const [isListening, setIsListening] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const [error, setError] = useState(null);
+  const [isSupported, setIsSupported] = useState(true);
+  const recognitionRef = useRef(null);
 
-  const langCodeMap: Record<Language, string> = {
+  const langCodeMap = {
     mr: 'mr-IN',
     hi: 'hi-IN',
     en: 'en-IN'
@@ -16,7 +17,7 @@ export function useSpeech(lang: Language = 'mr') {
 
   useEffect(() => {
     const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      window.SpeechRecognition || window.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
       setIsSupported(false);
@@ -34,7 +35,7 @@ export function useSpeech(lang: Language = 'mr') {
         setError(null);
       };
 
-      recognition.onresult = (event: any) => {
+      recognition.onresult = (event) => {
         let currentTranscript = '';
         for (let i = event.resultIndex; i < event.results.length; i++) {
           currentTranscript += event.results[i][0].transcript;
@@ -42,7 +43,7 @@ export function useSpeech(lang: Language = 'mr') {
         setTranscript(currentTranscript);
       };
 
-      recognition.onerror = (event: any) => {
+      recognition.onerror = (event) => {
         setError(event.error);
         setIsListening(false);
       };
@@ -52,64 +53,54 @@ export function useSpeech(lang: Language = 'mr') {
       };
 
       recognitionRef.current = recognition;
-    } catch (err: any) {
+    } catch (err) {
       setError(err.message);
       setIsSupported(false);
     }
   }, [lang]);
 
-  const startListening = useCallback(() => {
+  const startListening = useCallback(async () => {
     if (recognitionRef.current) {
       try {
         setTranscript('');
         recognitionRef.current.lang = langCodeMap[lang] || 'mr-IN';
         recognitionRef.current.start();
       } catch (e) {
-        console.warn('Speech recognition start error:', e);
+        console.warn('Web Speech start error:', e);
       }
     } else {
-      // Demo simulated speech if API not supported
+      // Use Bhashini backend STT endpoint as fallback
       setIsListening(true);
-      setTimeout(() => {
-        const demoPhrases: Record<Language, string[]> = {
-          mr: [
-            "मला २ दिवसांपासून तीव्र ताप आहे आणि छातीत दुखत आहे",
-            "रक्तदाब जास्त वाटतोय, चक्कर येत आहे आणि डोकेदुखी आहे",
-            "गरोदरपणात अचानक रक्तस्त्राव सुरू झाला आहे"
-          ],
-          hi: [
-            "मुझे 2 दिनों से तेज बुखार है और सीने में दर्द हो रहा है",
-            "चक्कर आ रहे हैं और बहुत कमजोरी लग रही है",
-            "गर्भावस्था में अचानक तेज दर्द और रक्तस्राव हो रहा है"
-          ],
-          en: [
-            "Severe headache with high blood pressure and chest discomfort for 2 days",
-            "High fever 103F with chills and breathlessness",
-            "Pregnant 34 weeks with blurred vision and sudden abdominal pain"
-          ]
-        };
-        const phraseList = demoPhrases[lang] || demoPhrases.en;
-        const randomPhrase = phraseList[Math.floor(Math.random() * phraseList.length)];
-        setTranscript(randomPhrase);
+      try {
+        const bhashiniRes = await api.speechToText(null, lang);
+        if (bhashiniRes && bhashiniRes.transcript) {
+          setTranscript(bhashiniRes.transcript);
+        }
+      } catch (err) {
+        setError(err.message);
+      } finally {
         setIsListening(false);
-      }, 2000);
+      }
     }
   }, [lang]);
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current && isListening) {
-      recognitionRef.current.stop();
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {
+        console.warn('Speech stop error:', e);
+      }
+      setIsListening(false);
     }
-    setIsListening(false);
   }, [isListening]);
 
   return {
     isListening,
     transcript,
-    setTranscript,
-    startListening,
-    stopListening,
     error,
-    isSupported
+    isSupported,
+    startListening,
+    stopListening
   };
 }

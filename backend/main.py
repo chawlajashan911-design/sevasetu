@@ -1,36 +1,92 @@
 import os
+import json
+import time
+import hashlib
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
+from collections import defaultdict
 
-from dotenv import load_dotenv
-load_dotenv()  # Load .env for local development
+from dotenv import load_dotenv, find_dotenv
 
-from fastapi import FastAPI, Depends, HTTPException, Query
+load_dotenv(find_dotenv())
+
+from fastapi import FastAPI, Depends, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, case, or_, func
+from sqlalchemy import desc, case, or_, func, text
 
 from .database import engine, Base, get_db
 from .models import (
     Patient, TriageRecord, Referral, Appointment,
-    Inventory, OutbreakCluster, AshaIncentive, Village
+    Inventory, OutbreakCluster, AshaIncentive, Village,
+    TeleconsultRoom, AbhaFieldTask
 )
 from .schemas import (
     PatientCreate, PatientResponse,
     TriageEvaluationRequest, TriageEvaluationResponse,
     DoctorVerificationRequest, ReferralCreate,
     AppointmentCreate, AppointmentResponse, AppointmentStatusUpdate,
-    BatchSyncRequest, InventoryUpdate, VitalsInput
+    BatchSyncRequest, InventoryUpdate, VitalsInput,
+    OtpRequest, OtpVerifyRequest, TeleconsultCreateRequest,
+    BhashiniTranslateRequest, AbhaFieldTaskCreate
 )
 from .triage_engine import triage_engine
-from .mock_services import BhashiniService, AbdmFhirService, ESanjeevaniService
-from .seed_data import seed_database, FACILITIES
+from .mock_services import AbdmFhirService
+from .services.abdm_service import AbdmService
+from .services.bhashini_service import BhashiniService
+from .services.esanjeevani_service import ESanjeevaniService
+from .seed_data import seed_database, reset_dynamic_data, seed_demo_data, FACILITIES
 from .hospital_loader import hospital_directory
+
+# In-memory caches for static/read-heavy endpoints
+_STATS_CACHE: Dict[str, Any] = {"villages": None, "hospitals": None, "updated_at": 0.0}
+_DISTRICTS_CACHE: Dict[str, Any] = {"data": None, "updated_at": 0.0}
+_VILLAGE_SEARCH_CACHE: Dict[str, Any] = {}
+
+# ----------------- Triage Deduplication & Rate Limiting Guardrails -----------------
+# Cache storing recent triage evaluations to prevent duplicate LLM invocations and duplicate DB records
+# Key: SHA256(fingerprint) -> {"result": dict, "timestamp": float}
+_TRIAGE_DEDUPLICATION_CACHE: Dict[str, Dict[str, Any]] = {}
+TRIAGE_DEDUP_TTL_SECONDS = 60.0  # 1 minute idempotency window for identical inputs
+
+# In-memory rate limiter per phone / client: max 15 evaluations per minute
+_TRIAGE_RATE_LIMITS: Dict[str, List[float]] = defaultdict(list)
+MAX_TRIAGE_PER_MINUTE = 15
+
+def _generate_triage_fingerprint(req: TriageEvaluationRequest) -> str:
+    """Computes a deterministic hash fingerprint from patient vitals and reported symptoms."""
+    v = req.vitals
+    raw = (
+        f"{req.phone or req.patient_name or 'citizen'}|"
+        f"{req.age or ''}|{req.gender or ''}|"
+        f"{v.systolic_bp or ''}|{v.diastolic_bp or ''}|{v.spo2 or ''}|"
+        f"{v.pulse_rate or ''}|{v.temperature or ''}|{v.symptom_duration_days or 1}|"
+        f"{(v.symptoms or '').strip().lower()}|{bool(v.high_risk_maternal)}"
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+def get_cached_system_counts(db: Session):
+    now = time.time()
+    if _STATS_CACHE["villages"] is not None and (now - _STATS_CACHE["updated_at"]) < 300:
+        return _STATS_CACHE["villages"], _STATS_CACHE["hospitals"]
+    v_cnt = db.query(func.count(Village.id)).scalar() or 0
+    h_cnt = hospital_directory.get_count()
+    _STATS_CACHE["villages"] = v_cnt
+    _STATS_CACHE["hospitals"] = h_cnt
+    _STATS_CACHE["updated_at"] = now
+    return v_cnt, h_cnt
 
 # Initialize DB tables (creates any missing tables — idempotent on Supabase)
 Base.metadata.create_all(bind=engine)
+try:
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE triage_records ADD COLUMN IF NOT EXISTS differential_diagnosis TEXT;"))
+        conn.execute(text("ALTER TABLE triage_records ADD COLUMN IF NOT EXISTS clinical_reasoning TEXT;"))
+        conn.execute(text("ALTER TABLE triage_records ADD COLUMN IF NOT EXISTS ai_model VARCHAR(80);"))
+except Exception:
+    pass
 
 # Seed database structure cleanly (no demo records)
 with next(get_db()) as db_session:
@@ -52,11 +108,113 @@ app.add_middleware(
 )
 
 
+# ----------------- OTP & ABHA Authentication -----------------
+@app.post("/api/v1/auth/request-otp")
+def request_otp(req: OtpRequest, db: Session = Depends(get_db)):
+    identifier = req.identifier.strip()
+    if not identifier:
+        raise HTTPException(status_code=400, detail="Phone number or ABHA identifier is required")
+    try:
+        return AbdmService.request_otp(identifier, req.role or "patient", db, req.demo)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/auth/verify-otp")
+def verify_otp(req: OtpVerifyRequest, db: Session = Depends(get_db)):
+    result = AbdmService.verify_otp(
+        session_id=req.session_id,
+        otp=req.otp,
+        role=req.role or "patient",
+        custom_name=req.name,
+        village=req.village,
+        taluka=req.taluka,
+        district=req.district,
+        db=db,
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=401, detail=result.get("message", "OTP verification failed"))
+    return result
+
+
+@app.post("/api/v1/auth/verify-abha")
+def verify_abha(req: dict):
+    result = AbdmService.verify_abha_id(req.get("abha_id", ""))
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("message", "ABHA ID not found"))
+    return result
+
+
+@app.post("/api/v1/system/reset-data")
+def reset_system_data(admin_key: Optional[str] = Header(None, alias="X-Admin-Key"), db: Session = Depends(get_db)):
+    app_env = (os.getenv("APP_ENV") or "development").lower()
+    if app_env == "production":
+        expected_key = os.getenv("ADMIN_SECRET_KEY")
+        if not expected_key or admin_key != expected_key:
+            raise HTTPException(status_code=403, detail="Reset data is protected in production environment")
+    reset_dynamic_data(db)
+    return {"success": True, "message": "Dynamic application data reset"}
+
+
+@app.post("/api/v1/system/demo-data")
+def load_demo_data(admin_key: Optional[str] = Header(None, alias="X-Admin-Key"), db: Session = Depends(get_db)):
+    app_env = (os.getenv("APP_ENV") or "development").lower()
+    if app_env == "production":
+        expected_key = os.getenv("ADMIN_SECRET_KEY")
+        if not expected_key or admin_key != expected_key:
+            raise HTTPException(status_code=403, detail="Demo data reload is protected in production environment")
+    seed_demo_data(db)
+    return {"success": True, "message": "Demo patients, triage, referrals, follow-ups, incentives, outbreaks, and medicines loaded"}
+
+
+@app.get("/api/v1/auth/check-abha")
+def check_abha(phone: str, db: Session = Depends(get_db)):
+    clean_phone = "".join(ch for ch in phone if ch.isdigit())[-10:]
+    official = AbdmService.find_official_registry_entry(clean_phone)
+    patient = db.query(Patient).filter(Patient.phone == clean_phone).first()
+    if official:
+        return {
+            "exists": True,
+            "has_abha": True,
+            "phone": clean_phone,
+            "abha_number": official["abha_number"],
+            "patient": official,
+        }
+    if patient:
+        return {
+            "exists": True,
+            "has_abha": bool(patient.abha_id),
+            "phone": clean_phone,
+            "abha_number": patient.abha_id,
+            "patient": {
+                "name": patient.name,
+                "village": patient.village,
+                "taluka": patient.taluka,
+                "district": patient.district,
+            },
+        }
+    return {"exists": False, "has_abha": False, "phone": clean_phone}
+
+
+@app.get("/api/v1/patient/abdm-profile")
+def get_patient_abdm_profile(identifier: str = Query(...), db: Session = Depends(get_db)):
+    """Fetches official longitudinal ABDM EHR profile and records."""
+    return AbdmService.get_abdm_profile(identifier, db)
+
+
+@app.post("/api/v1/patient/generate-abha")
+@app.post("/api/mock/abdm/generate-abha")
+def generate_abha(payload: dict):
+    """Dynamically generates authentic 14-digit ABHA Number and address."""
+    name = payload.get("name", "Patient")
+    phone = payload.get("phone", "9800000000")
+    return AbdmService.generate_abha_id(name, phone)
+
+
 # ----------------- API Root & Health -----------------
 @app.get("/api")
 def read_api_info(db: Session = Depends(get_db)):
-    villages_count = db.query(func.count(Village.id)).scalar() or 0
-    hospitals_count = len(hospital_directory.hospitals)
+    villages_count, hospitals_count = get_cached_system_counts(db)
     return {
         "system": "SevaSetu Rural Healthcare Platform",
         "status": "Operational",
@@ -69,8 +227,7 @@ def read_api_info(db: Session = Depends(get_db)):
 
 @app.get("/api/health")
 def health_check(db: Session = Depends(get_db)):
-    villages_count = db.query(func.count(Village.id)).scalar() or 0
-    hospitals_count = len(hospital_directory.hospitals)
+    villages_count, hospitals_count = get_cached_system_counts(db)
     return {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
@@ -90,12 +247,18 @@ def search_villages(
     db: Session = Depends(get_db),
 ):
     """
-    Fast search across authentic 44,810 Maharashtra villages stored in Supabase.
-    Returns matching village records with district/taluka info.
+    High-performance search across authentic 44,810 Maharashtra villages stored in Supabase.
+    Uses SQL-level ranking and memory caching to deliver instant autocomplete response.
     """
     query_str = q.strip()
     if not query_str:
         return []
+
+    cache_key = f"{query_str.lower()}:{district or ''}:{taluka or ''}:{limit}"
+    if cache_key in _VILLAGE_SEARCH_CACHE:
+        ts, data = _VILLAGE_SEARCH_CACHE[cache_key]
+        if time.time() - ts < 180:
+            return data
 
     db_query = db.query(Village)
 
@@ -104,29 +267,23 @@ def search_villages(
     if taluka:
         db_query = db_query.filter(func.lower(Village.taluka) == taluka.lower())
 
-    # Prefix matches first, then substring — union via Python for ordering
-    prefix_results = (
-        db_query.filter(Village.name.ilike(f'{query_str}%'))
-        .limit(limit)
-        .all()
-    )
-    prefix_ids = {v.id for v in prefix_results}
-
-    substr_results = (
+    results = (
         db_query.filter(
             or_(
-                Village.name.ilike(f'%{query_str}%'),
-                Village.taluka.ilike(f'%{query_str}%'),
-                Village.district.ilike(f'%{query_str}%'),
-            ),
-            Village.id.notin_(prefix_ids),
+                Village.name.ilike(f"{query_str}%"),
+                Village.taluka.ilike(f"%{query_str}%"),
+                Village.district.ilike(f"%{query_str}%"),
+            )
+        )
+        .order_by(
+            case((Village.name.ilike(f"{query_str}%"), 0), else_=1),
+            Village.name.asc(),
         )
         .limit(limit)
         .all()
     )
 
-    combined = prefix_results + substr_results
-    return [
+    formatted = [
         {
             "id": v.id,
             "name": v.name,
@@ -136,25 +293,45 @@ def search_villages(
             "talukaCode": v.taluka_code,
             "status": v.status,
         }
-        for v in combined[:limit]
+        for v in results
     ]
+
+    if len(_VILLAGE_SEARCH_CACHE) > 500:
+        _VILLAGE_SEARCH_CACHE.clear()
+    _VILLAGE_SEARCH_CACHE[cache_key] = (time.time(), formatted)
+    return formatted
 
 
 @app.get("/api/districts")
 def list_districts(db: Session = Depends(get_db)):
-    """Returns unique list of Maharashtra districts from Supabase villages table."""
+    """Returns unique cached list of Maharashtra districts from Supabase villages table."""
+    now = time.time()
+    if _DISTRICTS_CACHE["data"] is not None and (now - _DISTRICTS_CACHE["updated_at"]) < 3600:
+        return _DISTRICTS_CACHE["data"]
     rows = db.query(Village.district).distinct().order_by(Village.district).all()
-    return [r[0] for r in rows if r[0]]
+    data = [r[0] for r in rows if r[0]]
+    _DISTRICTS_CACHE["data"] = data
+    _DISTRICTS_CACHE["updated_at"] = now
+    return data
 
 
 @app.get("/api/talukas")
 def list_talukas(district: Optional[str] = None, db: Session = Depends(get_db)):
-    """Returns talukas for a given district (or all talukas) from Supabase."""
+    """Returns cached talukas for a given district (or all talukas) from Supabase."""
+    now = time.time()
+    cache_key = (district or "ALL").lower()
+    if cache_key in _TALUKAS_CACHE:
+        ts, data = _TALUKAS_CACHE[cache_key]
+        if now - ts < 3600:
+            return data
     q = db.query(Village.taluka).distinct()
     if district:
         q = q.filter(func.lower(Village.district) == district.lower())
     rows = q.order_by(Village.taluka).all()
-    return [r[0] for r in rows if r[0]]
+    data = [r[0] for r in rows if r[0]]
+    _TALUKAS_CACHE[cache_key] = (now, data)
+    return data
+
 
 
 # ----------------- Facilities & Government Hospital Directory -----------------
@@ -217,6 +394,25 @@ def get_hospital_details(hospital_id: str):
 # ----------------- Patients -----------------
 @app.post("/api/patients", response_model=PatientResponse)
 def create_patient(patient_in: PatientCreate, db: Session = Depends(get_db)):
+    # Check if patient already exists by phone or abha_id to prevent UniqueViolation errors
+    existing = None
+    if patient_in.phone:
+        existing = db.query(Patient).filter(Patient.phone == patient_in.phone).first()
+    if not existing and patient_in.abha_id:
+        existing = db.query(Patient).filter(Patient.abha_id == patient_in.abha_id).first()
+    if existing:
+        if patient_in.name and patient_in.name != existing.name:
+            existing.name = patient_in.name
+        if patient_in.village and patient_in.village != existing.village:
+            existing.village = patient_in.village
+        if patient_in.taluka and patient_in.taluka != existing.taluka:
+            existing.taluka = patient_in.taluka
+        if patient_in.district and patient_in.district != existing.district:
+            existing.district = patient_in.district
+        db.commit()
+        db.refresh(existing)
+        return existing
+
     # Auto-generate ABHA ID if not provided
     abha_data = AbdmFhirService.generate_abha_id(patient_in.name, patient_in.phone)
     abha_id = patient_in.abha_id or abha_data["abha_number"]
@@ -248,10 +444,42 @@ def list_patients(limit: int = 50, db: Session = Depends(get_db)):
 @app.post("/api/triage/evaluate", response_model=TriageEvaluationResponse)
 def evaluate_triage(req: TriageEvaluationRequest, db: Session = Depends(get_db)):
     """
-    Evaluates vitals and symptoms using deterministic rule-based triage.
-    Saves record to Doctor queue automatically.
+    Evaluates vitals and symptoms using hybrid clinical AI (Gemini + clinical safety floors).
+    Includes continuous POST request guardrails:
+    1. Rate limiting (max 15 requests / minute per client/phone).
+    2. Idempotency deduplication: identical inputs within 60s return cached results without re-invoking Gemini or duplicating DB records.
     """
-    triage_result = triage_engine.evaluate(req.vitals)
+    now = time.time()
+    client_id = req.phone or req.patient_name or "anonymous"
+
+    # 1. Rate Limiting Guardrail
+    timestamps = _TRIAGE_RATE_LIMITS[client_id]
+    _TRIAGE_RATE_LIMITS[client_id] = [t for t in timestamps if now - t < 60.0]
+    if len(_TRIAGE_RATE_LIMITS[client_id]) >= MAX_TRIAGE_PER_MINUTE:
+        raise HTTPException(
+            status_code=429,
+            detail="Rate limit exceeded: Please wait a few seconds before requesting another triage evaluation."
+        )
+    _TRIAGE_RATE_LIMITS[client_id].append(now)
+
+    # 2. Idempotency Deduplication Guardrail (Continuous POST on identical inputs)
+    fingerprint = _generate_triage_fingerprint(req)
+    cached_entry = _TRIAGE_DEDUPLICATION_CACHE.get(fingerprint)
+    if cached_entry and (now - cached_entry["timestamp"]) < TRIAGE_DEDUP_TTL_SECONDS:
+        cached_result = dict(cached_entry["result"])
+        cached_result["cached"] = True
+        return cached_result
+
+    # 3. Fresh Evaluation via Gemini 3.6 Flash + Safety Guardrails
+    triage_result = triage_engine.evaluate(
+        vitals=req.vitals,
+        age=req.age,
+        gender=req.gender,
+        patient_name=req.patient_name
+    )
+
+    diff_list = triage_result.get("differential_diagnosis") or []
+    diff_json = json.dumps(diff_list) if isinstance(diff_list, list) else str(diff_list)
 
     record = TriageRecord(
         patient_id=req.patient_id,
@@ -275,6 +503,9 @@ def evaluate_triage(req: TriageEvaluationRequest, db: Session = Depends(get_db))
         triage_reason=triage_result["triage_reason"],
         confidence_score=triage_result["confidence_score"],
         doctor_verification_required=triage_result["doctor_verification_required"],
+        differential_diagnosis=diff_json,
+        clinical_reasoning=triage_result.get("clinical_reasoning"),
+        ai_model=triage_result.get("model_engine") or "Gemini 3.6 Flash + Clinical Rule Guardrail v2.0",
         doctor_verified=False,
         status="Pending",
         source=req.source or "Patient"
@@ -283,7 +514,7 @@ def evaluate_triage(req: TriageEvaluationRequest, db: Session = Depends(get_db))
     db.commit()
     db.refresh(record)
 
-    return {
+    output = {
         "id": record.id,
         "priority": triage_result["priority"],
         "triage_label": triage_result["triage_label"],
@@ -294,7 +525,20 @@ def evaluate_triage(req: TriageEvaluationRequest, db: Session = Depends(get_db))
         "disclaimer": triage_result["disclaimer"],
         "triggers": triage_result["triggers"],
         "recommended_action": triage_result["recommended_action"],
+        "differential_diagnosis": triage_result.get("differential_diagnosis") or [],
+        "clinical_reasoning": triage_result.get("clinical_reasoning"),
+        "red_flag_warnings": triage_result.get("red_flag_warnings") or [],
+        "recommended_investigations": triage_result.get("recommended_investigations") or [],
+        "ai_model": triage_result.get("model_engine") or "Gemini 3.6 Flash + Clinical Rule Guardrail v2.0",
+        "cached": False,
     }
+
+    _TRIAGE_DEDUPLICATION_CACHE[fingerprint] = {
+        "result": output,
+        "timestamp": now
+    }
+
+    return output
 
 
 @app.get("/api/triage/queue")
@@ -327,8 +571,17 @@ def get_doctor_queue(
 
     records = query.order_by(priority_order, desc(TriageRecord.created_at)).all()
 
-    return [
-        {
+    results = []
+    for r in records:
+        diff_list = []
+        if r.differential_diagnosis:
+            try:
+                diff_list = json.loads(r.differential_diagnosis)
+                if not isinstance(diff_list, list):
+                    diff_list = [str(diff_list)]
+            except Exception:
+                diff_list = [d.strip() for d in r.differential_diagnosis.split(",") if d.strip()]
+        results.append({
             "id": r.id,
             "patient_id": r.patient_id,
             "patient_name": r.patient_name,
@@ -350,6 +603,9 @@ def get_doctor_queue(
             "priority": r.priority,
             "triage_reason": r.triage_reason,
             "confidence_score": r.confidence_score,
+            "differential_diagnosis": diff_list,
+            "clinical_reasoning": r.clinical_reasoning,
+            "ai_model": r.ai_model,
             "doctor_verified": r.doctor_verified,
             "doctor_name": r.doctor_name,
             "doctor_notes": r.doctor_notes,
@@ -357,9 +613,9 @@ def get_doctor_queue(
             "status": r.status,
             "source": r.source,
             "created_at": r.created_at.isoformat() if r.created_at else None,
-        }
-        for r in records
-    ]
+        })
+
+    return results
 
 
 @app.post("/api/triage/verify")
@@ -683,7 +939,8 @@ def get_outbreak_heatmap(db: Session = Depends(get_db)):
     }
 
 
-# ----------------- Mock Services Endpoints -----------------
+# ----------------- Bhashini, eSanjeevani & ABDM Gateway Endpoints -----------------
+@app.post("/api/v1/bhashini/translate")
 @app.post("/api/mock/bhashini/translate")
 def translate_bhashini(payload: dict):
     text = payload.get("text", "")
@@ -692,26 +949,108 @@ def translate_bhashini(payload: dict):
     return BhashiniService.translate_text(text, source_lang, target_lang)
 
 
+@app.post("/api/v1/bhashini/stt")
 @app.post("/api/mock/bhashini/asr")
 def asr_bhashini(payload: dict):
+    audio = payload.get("audio")
     duration = payload.get("duration", 2.5)
-    lang = payload.get("language", "mr")
-    return BhashiniService.process_voice_asr(duration, lang)
+    lang = payload.get("language") or payload.get("lang") or "mr"
+    if audio:
+        return BhashiniService.speech_to_text(audio_base64=audio, language=lang)
+    return BhashiniService.process_voice_asr(duration=duration, language=lang)
 
 
-@app.post("/api/mock/abdm/generate-abha")
-def generate_abha(payload: dict):
-    name = payload.get("name", "Patient")
-    phone = payload.get("phone", "9800000000")
-    return AbdmFhirService.generate_abha_id(name, phone)
-
-
+@app.post("/api/v1/teleconsult/create-room")
 @app.post("/api/mock/esanjeevani/create-session")
-def create_esanjeevani_session(payload: dict):
+def create_teleconsult_room(payload: dict, db: Session = Depends(get_db)):
     patient_name = payload.get("patient_name", "Patient")
     priority = payload.get("priority", "P1")
-    facility_name = payload.get("facility_name", "Healthcare Centre")
-    return ESanjeevaniService.create_teleconsult_session(patient_name, priority, facility_name)
+    facility_name = payload.get("facility_name", "Primary Healthcare Centre")
+    triage_id = payload.get("triage_id")
+    doctor_name = payload.get("doctor_name", "Duty Medical Officer")
+    return ESanjeevaniService.create_room(
+        patient_name=patient_name,
+        priority=priority,
+        facility_name=facility_name,
+        triage_id=triage_id,
+        doctor_name=doctor_name,
+        db=db,
+    )
+
+
+@app.get("/api/v1/teleconsult/room/{session_id}")
+def get_teleconsult_room(session_id: str, db: Session = Depends(get_db)):
+    room = ESanjeevaniService.get_room(session_id=session_id, db=db)
+    if not room:
+        raise HTTPException(status_code=404, detail="Teleconsultation room not found")
+    return room
+
+
+# ----------------- ASHA Worker ABHA Field Tasks -----------------
+@app.post("/api/v1/abha/field-task")
+def create_abha_field_task(req: AbhaFieldTaskCreate, db: Session = Depends(get_db)):
+    task = AbhaFieldTask(
+        patient_name=req.patient_name or "Citizen Patient",
+        phone=req.phone,
+        village=req.village or "Kharpudi",
+        taluka=req.taluka or "Khed",
+        district=req.district or "Pune",
+        reason=req.reason or "Patient Needs ABHA Registration Field Assistance",
+        status="Pending Assistance"
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return {
+        "success": True,
+        "task_id": task.id,
+        "task": {
+            "id": task.id,
+            "patient_name": task.patient_name,
+            "phone": task.phone,
+            "village": task.village,
+            "status": task.status
+        }
+    }
+
+
+@app.get("/api/v1/abha/field-tasks")
+def list_abha_field_tasks(
+    village: Optional[str] = None,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    q = db.query(AbhaFieldTask)
+    if village and village != "All":
+        q = q.filter(func.lower(AbhaFieldTask.village) == village.lower())
+    if status and status != "All":
+        q = q.filter(AbhaFieldTask.status == status)
+    tasks = q.order_by(desc(AbhaFieldTask.id)).limit(100).all()
+    return [
+        {
+            "id": t.id,
+            "patient_name": t.patient_name,
+            "phone": t.phone,
+            "village": t.village,
+            "taluka": t.taluka,
+            "district": t.district,
+            "reason": t.reason,
+            "status": t.status,
+            "created_at": t.created_at.isoformat() if t.created_at else None
+        }
+        for t in tasks
+    ]
+
+
+@app.patch("/api/v1/abha/field-tasks/{task_id}/resolve")
+def resolve_abha_field_task(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(AbhaFieldTask).filter(AbhaFieldTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Field task not found")
+    task.status = "Completed"
+    db.commit()
+    return {"success": True, "task_id": task_id, "status": "Completed"}
+
 
 
 # ----------------- Static Files & Single Page Application (SPA) Serving -----------------
@@ -729,7 +1068,10 @@ if os.path.exists(FRONTEND_DIST):
     async def serve_spa_root():
         index_path = os.path.join(FRONTEND_DIST, "index.html")
         if os.path.isfile(index_path):
-            return FileResponse(index_path)
+            return FileResponse(
+                index_path,
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+            )
         raise HTTPException(status_code=404, detail="index.html not found")
 
     @app.get("/{full_path:path}")
@@ -746,7 +1088,10 @@ if os.path.exists(FRONTEND_DIST):
         # SPA client-side routing fallback: return index.html for React Router
         index_path = os.path.join(FRONTEND_DIST, "index.html")
         if os.path.isfile(index_path):
-            return FileResponse(index_path)
+            return FileResponse(
+                index_path,
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+            )
 
         raise HTTPException(status_code=404, detail="Frontend build index.html not found")
 else:

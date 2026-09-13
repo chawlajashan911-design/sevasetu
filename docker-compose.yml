@@ -11,4 +11,6 @@ services:
     environment:
       - PORT=8000
       - DATABASE_URL=${DATABASE_URL}
+    volumes:
+      - ./backend:/app/backend
     restart: unless-stopped
