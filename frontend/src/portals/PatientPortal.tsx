@@ -36,10 +36,13 @@ import {
   HelpCircle,
   Search,
   Plus,
-  Minus
+  Minus,
+  Navigation
 } from 'lucide-react';
+import { getLocalizedClinicalData } from '../i18n/indicMedical';
 
 export const PatientPortal = ({
+  currentUser,
   language,
   openSOS,
   openAbha,
@@ -53,25 +56,38 @@ export const PatientPortal = ({
   const [activeTab, setActiveTab] = useState('triage');
   const { isDemoMode } = useDemoMode();
 
-  // Load patient profile & village from localStorage if present
+  // Gemini suggestions language: English / Hindi / Marathi
+  const [geminiLang, setGeminiLang] = useState(language || 'mr');
+
+  useEffect(() => {
+    if (language) setGeminiLang(language);
+  }, [language]);
+
+  // Load patient profile & village from localStorage or currentUser prop
   const getInitialPatientData = () => {
-    let village = '';
-    let taluka = '';
-    let district = '';
-    let name = '';
-    let phone = '';
-    let abha_id = '';
+    let village = currentUser?.village || '';
+    let taluka = currentUser?.taluka || '';
+    let district = currentUser?.district || '';
+    let name = currentUser?.name || '';
+    let phone = currentUser?.phone || '';
+    let abha_id = currentUser?.abha_number || currentUser?.abha_id || '';
+    let id = currentUser?.id || undefined;
+    let records = currentUser?.records || [];
 
     try {
-      const savedUser = localStorage.getItem('sevasetu_user');
-      if (savedUser) {
-        const u = JSON.parse(savedUser);
-        if (u.name) name = u.name;
-        if (u.phone) phone = u.phone;
-        if (u.village) village = u.village;
-        if (u.taluka) taluka = u.taluka;
-        if (u.district) district = u.district;
-        if (u.abha_number || u.abha_id) abha_id = u.abha_number || u.abha_id;
+      if (!name) {
+        const savedUser = localStorage.getItem('sevasetu_user');
+        if (savedUser) {
+          const u = JSON.parse(savedUser);
+          if (u.name) name = u.name;
+          if (u.phone) phone = u.phone;
+          if (u.village) village = u.village;
+          if (u.taluka) taluka = u.taluka;
+          if (u.district) district = u.district;
+          if (u.abha_number || u.abha_id) abha_id = u.abha_number || u.abha_id;
+          if (u.id) id = u.id;
+          if (u.records) records = u.records;
+        }
       }
 
       const savedVillage = localStorage.getItem('sevasetu_patient_village');
@@ -85,9 +101,10 @@ export const PatientPortal = ({
       console.warn('Error reading saved patient profile:', e);
     }
 
-    // Only populate seed profile if Demo Mode is explicitly active
+    // Only populate seed profile if Demo Mode is explicitly active and no user logged in
     if (!name && isDemoMode) {
       return {
+        id: 1,
         name: 'Sunita Patil',
         age: 28,
         gender: 'Female',
@@ -96,26 +113,37 @@ export const PatientPortal = ({
         taluka: 'Khed',
         district: 'Pune',
         wadi: 'Main Area',
-        abha_id: '91-4829-1029-4512'
+        abha_id: '91-4829-1029-4512',
+        records: []
       };
     }
 
     return {
+      id,
       name,
-      age: name ? 28 : '',
-      gender: 'Female',
+      age: name ? (currentUser?.age || 28) : '',
+      gender: currentUser?.gender || 'Female',
       phone,
       village,
       taluka,
       district,
       wadi: '',
-      abha_id
+      abha_id,
+      records
     };
   };
 
   // Patient Registration Form State
   const [regForm, setRegForm] = useState(getInitialPatientData);
   const [registeredPatient, setRegisteredPatient] = useState(getInitialPatientData);
+
+  useEffect(() => {
+    if (currentUser) {
+      const data = getInitialPatientData();
+      setRegisteredPatient(data);
+      setRegForm(data);
+    }
+  }, [currentUser]);
 
   // Vitals & Symptoms Form State - clean state for custom testing or 1-click test scenarios
   const [systolicBp, setSystolicBp] = useState('');
@@ -193,10 +221,14 @@ export const PatientPortal = ({
   const [apptReason, setApptReason] = useState('Routine OPD Consultation & Checkup');
   const [bookingSuccessMsg, setBookingSuccessMsg] = useState(null);
 
-  // Load facilities from Government Hospital Directory (PostgreSQL)
+  // Load facilities from Government Hospital Directory (PostgreSQL) and patient isolated records
   const refreshPatientData = async () => {
     try {
       setLoadingFacilities(true);
+      const activePatientName = registeredPatient?.name || '';
+      const activePatientPhone = registeredPatient?.phone || '';
+      const activePatientId = registeredPatient?.id;
+
       const [facsRes, refsRes, apptsRes, qRes] = await Promise.allSettled([
         api.getFacilities({
           district: registeredPatient?.district || 'Pune',
@@ -208,9 +240,13 @@ export const PatientPortal = ({
           lng: gpsLocation?.lng,
           limit: 50
         }),
-        api.getReferrals(),
-        api.getAppointments(),
-        api.getDoctorQueue()
+        api.getReferrals(undefined, undefined, activePatientName || undefined),
+        api.getAppointments(undefined, undefined, undefined, activePatientName || undefined, activePatientPhone || undefined),
+        api.getDoctorQueue({
+          patient_id: activePatientId,
+          patient_name: activePatientName || undefined,
+          phone: activePatientPhone || undefined
+        })
       ]);
 
       const facs = facsRes.status === 'fulfilled' ? facsRes.value : [];
@@ -218,9 +254,35 @@ export const PatientPortal = ({
       if (facs && facs.length > 0 && !selectedFacilityForAppt) {
         setSelectedFacilityForAppt(facs[0].name);
       }
-      setReferrals(refsRes.status === 'fulfilled' ? refsRes.value || [] : []);
-      setAppointments(apptsRes.status === 'fulfilled' ? apptsRes.value || [] : []);
-      setPastTriageRecords(qRes.status === 'fulfilled' ? qRes.value || [] : []);
+
+      // Patient Data Isolation: ONLY show records belonging to the logged-in patient
+      const allRefs = refsRes.status === 'fulfilled' ? refsRes.value || [] : [];
+      const filteredRefs = allRefs.filter(r => {
+        if (!activePatientName && !activePatientPhone && !activePatientId) return false;
+        const nameMatch = activePatientName && r.patient_name?.trim().toLowerCase() === activePatientName.trim().toLowerCase();
+        const idMatch = activePatientId && r.patient_id === activePatientId;
+        return nameMatch || idMatch;
+      });
+      setReferrals(filteredRefs);
+
+      const allAppts = apptsRes.status === 'fulfilled' ? apptsRes.value || [] : [];
+      const filteredAppts = allAppts.filter(a => {
+        if (!activePatientName && !activePatientPhone) return false;
+        const nameMatch = activePatientName && a.patient_name?.trim().toLowerCase() === activePatientName.trim().toLowerCase();
+        const phoneMatch = activePatientPhone && a.phone === activePatientPhone;
+        return nameMatch || phoneMatch;
+      });
+      setAppointments(filteredAppts);
+
+      const allQueue = qRes.status === 'fulfilled' ? qRes.value || [] : [];
+      const filteredTriage = allQueue.filter(r => {
+        if (!activePatientName && !activePatientPhone && !activePatientId) return false;
+        const nameMatch = activePatientName && r.patient_name?.trim().toLowerCase() === activePatientName.trim().toLowerCase();
+        const phoneMatch = activePatientPhone && r.phone === activePatientPhone;
+        const idMatch = activePatientId && r.patient_id === activePatientId;
+        return nameMatch || phoneMatch || idMatch;
+      });
+      setPastTriageRecords(filteredTriage);
     } catch (e) {
       console.warn('Patient portal data load:', e);
     } finally {
@@ -230,7 +292,17 @@ export const PatientPortal = ({
 
   useEffect(() => {
     refreshPatientData();
-  }, [registeredPatient?.district, registeredPatient?.taluka, registeredPatient?.village, hospitalCategoryFilter, gpsLocation?.lat, gpsLocation?.lng]);
+  }, [
+    registeredPatient?.name,
+    registeredPatient?.phone,
+    registeredPatient?.id,
+    registeredPatient?.district,
+    registeredPatient?.taluka,
+    registeredPatient?.village,
+    hospitalCategoryFilter,
+    gpsLocation?.lat,
+    gpsLocation?.lng
+  ]);
 
   // Sync voice transcript to symptoms input
   useEffect(() => {
@@ -982,136 +1054,170 @@ export const PatientPortal = ({
             )}
 
             {triageResult ? (
-              <div className={`p-6 sm:p-7 rounded-3xl border-2 shadow-lg space-y-4 transition-opacity duration-300 ${
-                triageLoading ? 'opacity-40 pointer-events-none' : 'opacity-100'
-              } ${
-                triageResult.priority === 'P1'
-                  ? 'bg-red-50/90 border-red-500 text-red-950'
-                  : triageResult.priority === 'P2'
-                  ? 'bg-amber-50/90 border-amber-500 text-amber-950'
-                  : 'bg-emerald-50/90 border-emerald-500 text-emerald-950'
-              }`}>
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs font-black uppercase px-3 py-1 rounded-full text-white shadow-sm ${
-                    triageResult.priority === 'P1' ? 'bg-red-600 animate-pulse' : triageResult.priority === 'P2' ? 'bg-amber-600' : 'bg-emerald-600'
+              (() => {
+                const localizedClinical = getLocalizedClinicalData(triageResult, geminiLang);
+                return (
+                  <div className={`p-6 sm:p-7 rounded-3xl border-2 shadow-lg space-y-4 transition-opacity duration-300 ${
+                    triageLoading ? 'opacity-40 pointer-events-none' : 'opacity-100'
+                  } ${
+                    triageResult.priority === 'P1'
+                      ? 'bg-red-50/90 border-red-500 text-red-950'
+                      : triageResult.priority === 'P2'
+                      ? 'bg-amber-50/90 border-amber-500 text-amber-950'
+                      : 'bg-emerald-50/90 border-emerald-500 text-emerald-950'
                   }`}>
-                    {triageResult.triage_label || `${triageResult.priority} Triage`}
-                  </span>
-                  <span className="text-xs font-bold text-slate-500">
-                    Confidence: {(triageResult.confidence_score * 100).toFixed(0)}%
-                  </span>
-                </div>
-
-                <div>
-                  <h4 className="text-xl font-black">
-                    {triageResult.priority === 'P1' ? t.p1_title : triageResult.priority === 'P2' ? t.p2_title : t.p3_title}
-                  </h4>
-                  <p className="text-xs font-semibold mt-1">
-                    {triageResult.triage_reason}
-                  </p>
-                </div>
-
-                {/* AI Model Badge */}
-                <div className="flex items-center space-x-1.5 text-[11px] font-bold text-teal-800 bg-teal-100/90 px-2.5 py-1 rounded-xl border border-teal-200">
-                  <Sparkles className="w-3.5 h-3.5 text-teal-600 shrink-0" />
-                  <span>{triageResult.ai_model || 'Gemini 3.6 Flash Clinical AI'}</span>
-                </div>
-
-                {/* AI Differential Diagnosis */}
-                {triageResult.differential_diagnosis && triageResult.differential_diagnosis.length > 0 && (
-                  <div className="p-3.5 bg-white/90 rounded-2xl border border-slate-200 space-y-1.5">
-                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-700">
-                      🩺 AI Differential Impression:
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {triageResult.differential_diagnosis.map((diag, i) => (
-                        <span key={i} className="px-2.5 py-1 bg-slate-100 text-slate-800 text-[11px] font-bold rounded-lg border border-slate-300">
-                          {diag}
-                        </span>
-                      ))}
+                    <div className="flex items-center justify-between">
+                      <span className={`text-xs font-black uppercase px-3 py-1 rounded-full text-white shadow-sm ${
+                        triageResult.priority === 'P1' ? 'bg-red-600 animate-pulse' : triageResult.priority === 'P2' ? 'bg-amber-600' : 'bg-emerald-600'
+                      }`}>
+                        {triageResult.triage_label || `${triageResult.priority} Triage`}
+                      </span>
+                      <span className="text-xs font-bold text-slate-500">
+                        Confidence: {(triageResult.confidence_score * 100).toFixed(0)}%
+                      </span>
                     </div>
-                  </div>
-                )}
 
-                {/* Clinical Reasoning */}
-                {triageResult.clinical_reasoning && (
-                  <div className="p-3 bg-white/70 rounded-2xl border border-slate-200 text-xs text-slate-700">
-                    <span className="font-bold text-slate-900 block mb-0.5">Clinical Evaluation:</span>
-                    <p className="text-[11px] leading-relaxed text-slate-600 font-medium">{triageResult.clinical_reasoning}</p>
-                  </div>
-                )}
-
-                {/* Red Flag Warnings */}
-                {triageResult.red_flag_warnings && triageResult.red_flag_warnings.length > 0 && (
-                  <div className="p-3 bg-rose-50/90 rounded-2xl border border-rose-200 text-xs text-rose-950 space-y-1">
-                    <span className="font-black text-rose-900 text-[11px] uppercase tracking-wide">
-                      🚨 Danger Signs / Red Flags:
-                    </span>
-                    <ul className="list-disc list-inside text-[11px] space-y-0.5 text-rose-800 font-medium">
-                      {triageResult.red_flag_warnings.map((flag, i) => (
-                        <li key={i}>{flag}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                {/* Recommended Investigations */}
-                {triageResult.recommended_investigations && triageResult.recommended_investigations.length > 0 && (
-                  <div className="p-3 bg-blue-50/80 rounded-2xl border border-blue-200 text-xs text-blue-950 space-y-1">
-                    <span className="font-bold text-blue-900 text-[11px] uppercase tracking-wide">
-                      Recommended Investigations:
-                    </span>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {triageResult.recommended_investigations.map((inv, i) => (
-                        <span key={i} className="px-2 py-0.5 bg-blue-100/90 text-blue-800 rounded-md text-[10px] font-semibold">
-                          {inv}
-                        </span>
-                      ))}
+                    <div>
+                      <h4 className="text-xl font-black">
+                        {triageResult.priority === 'P1' ? t.p1_title : triageResult.priority === 'P2' ? t.p2_title : t.p3_title}
+                      </h4>
+                      <p className="text-xs font-semibold mt-1">
+                        {triageResult.triage_reason}
+                      </p>
                     </div>
-                  </div>
-                )}
 
-                {triageResult.triggers && triageResult.triggers.length > 0 && (
-                  <div className="space-y-1 pt-2 border-t border-slate-200/60">
-                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-600">Clinical Triggers:</p>
-                    {triageResult.triggers.map((trig, i) => (
-                      <div key={i} className="flex items-center space-x-1.5 text-xs font-bold">
-                        <span className="w-1.5 h-1.5 rounded-full bg-slate-700"></span>
-                        <span>{trig}</span>
+                    {/* AI Model Badge & Dedicated Language Selector */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap pb-1 border-b border-slate-200/60">
+                      <div className="flex items-center space-x-1.5 text-[11px] font-bold text-teal-800 bg-teal-100/90 px-2.5 py-1 rounded-xl border border-teal-200">
+                        <Sparkles className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                        <span>{triageResult.ai_model || 'Gemini 3.6 Flash Clinical AI'}</span>
                       </div>
-                    ))}
+
+                      {/* Language Selection: English / Hindi / Marathi */}
+                      <div className="flex items-center bg-white/90 p-0.5 rounded-xl border border-slate-300 shadow-2xs">
+                        <span className="text-[10px] font-bold text-slate-500 px-2">Language:</span>
+                        {[
+                          { code: 'en', label: 'English' },
+                          { code: 'hi', label: 'हिंदी' },
+                          { code: 'mr', label: 'मराठी' }
+                        ].map(({ code, label }) => (
+                          <button
+                            key={code}
+                            type="button"
+                            onClick={() => setGeminiLang(code)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                              geminiLang === code
+                                ? 'bg-teal-600 text-white shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* AI Differential Diagnosis */}
+                    {localizedClinical.differential && localizedClinical.differential.length > 0 && (
+                      <div className="p-3.5 bg-white/90 rounded-2xl border border-slate-200 space-y-1.5">
+                        <p className="text-[11px] font-black uppercase tracking-wider text-slate-700">
+                          🩺 {geminiLang === 'mr' ? 'संभाव्य निदान (AI Differential Impression):' : geminiLang === 'hi' ? 'संभावित विभेदक निदान (AI Differential Impression):' : 'AI Differential Impression:'}
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {localizedClinical.differential.map((diag, i) => (
+                            <span key={i} className="px-2.5 py-1 bg-slate-100 text-slate-800 text-[11px] font-bold rounded-lg border border-slate-300">
+                              {diag}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Clinical Reasoning */}
+                    {localizedClinical.reasoning && (
+                      <div className="p-3 bg-white/70 rounded-2xl border border-slate-200 text-xs text-slate-700">
+                        <span className="font-bold text-slate-900 block mb-0.5">
+                          {geminiLang === 'mr' ? 'वैद्यकीय विश्लेषण (Clinical Evaluation):' : geminiLang === 'hi' ? 'नैदानिक मूल्यांकन (Clinical Evaluation):' : 'Clinical Evaluation:'}
+                        </span>
+                        <p className="text-[11px] leading-relaxed text-slate-600 font-medium">{localizedClinical.reasoning}</p>
+                      </div>
+                    )}
+
+                    {/* Red Flag Warnings */}
+                    {localizedClinical.redFlags && localizedClinical.redFlags.length > 0 && (
+                      <div className="p-3 bg-rose-50/90 rounded-2xl border border-rose-200 text-xs text-rose-950 space-y-1">
+                        <span className="font-black text-rose-900 text-[11px] uppercase tracking-wide">
+                          🚨 {geminiLang === 'mr' ? 'धोक्याची लक्षणे (Danger Signs / Red Flags):' : geminiLang === 'hi' ? 'खतरे के संकेत (Danger Signs / Red Flags):' : 'Danger Signs / Red Flags:'}
+                        </span>
+                        <ul className="list-disc list-inside text-[11px] space-y-0.5 text-rose-800 font-medium">
+                          {localizedClinical.redFlags.map((flag, i) => (
+                            <li key={i}>{flag}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {/* Recommended Investigations */}
+                    {localizedClinical.investigations && localizedClinical.investigations.length > 0 && (
+                      <div className="p-3 bg-blue-50/80 rounded-2xl border border-blue-200 text-xs text-blue-950 space-y-1">
+                        <span className="font-bold text-blue-900 text-[11px] uppercase tracking-wide">
+                          {geminiLang === 'mr' ? 'शिफारस केलेल्या तपासण्या (Recommended Investigations):' : geminiLang === 'hi' ? 'अनुशंसित जांचें (Recommended Investigations):' : 'Recommended Investigations:'}
+                        </span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {localizedClinical.investigations.map((inv, i) => (
+                            <span key={i} className="px-2 py-0.5 bg-blue-100/90 text-blue-800 rounded-md text-[10px] font-semibold">
+                              {inv}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {triageResult.triggers && triageResult.triggers.length > 0 && (
+                      <div className="space-y-1 pt-2 border-t border-slate-200/60">
+                        <p className="text-[11px] font-black uppercase tracking-wider text-slate-600">Clinical Triggers:</p>
+                        {triageResult.triggers.map((trig, i) => (
+                          <div key={i} className="flex items-center space-x-1.5 text-xs font-bold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-700"></span>
+                            <span>{trig}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="p-3.5 bg-white/80 rounded-2xl border border-slate-200 text-xs font-semibold text-slate-700 space-y-1">
+                      <p className="font-bold text-slate-900">
+                        {geminiLang === 'mr' ? 'पुढील आवश्यक कृती (Recommended Action):' : geminiLang === 'hi' ? 'अनुशंसित अगला कदम (Recommended Action):' : 'Recommended Next Step:'}
+                      </p>
+                      <p>{localizedClinical.action || triageResult.recommended_action || "Visit nearest Primary Health Centre or book an OPD slot."}</p>
+                    </div>
+
+                    <div className="space-y-2 pt-2">
+                      <button
+                        onClick={() => setActiveTab('book_appointment')}
+                        className="w-full py-2.5 bg-teal-700 hover:bg-teal-800 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-sm cursor-pointer"
+                      >
+                        <Calendar className="w-3.5 h-3.5" />
+                        <span>Book Facility Appointment</span>
+                      </button>
+
+                      {triageResult.priority === 'P1' && (
+                        <button
+                          onClick={openSOS}
+                          className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-md animate-pulse cursor-pointer"
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                          <span>{t.call_ambulance_btn}</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <p className="text-[10px] text-slate-500 text-center font-medium pt-1">
+                      ⚠️ {t.verification_warning}
+                    </p>
                   </div>
-                )}
-
-                <div className="p-3.5 bg-white/80 rounded-2xl border border-slate-200 text-xs font-semibold text-slate-700 space-y-1">
-                  <p className="font-bold text-slate-900">Recommended Next Step:</p>
-                  <p>{triageResult.recommended_action || "Visit nearest Primary Health Centre or book an OPD slot."}</p>
-                </div>
-
-                <div className="space-y-2 pt-2">
-                  <button
-                    onClick={() => setActiveTab('book_appointment')}
-                    className="w-full py-2.5 bg-teal-700 hover:bg-teal-800 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-sm cursor-pointer"
-                  >
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>Book Facility Appointment</span>
-                  </button>
-
-                  {triageResult.priority === 'P1' && (
-                    <button
-                      onClick={openSOS}
-                      className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 shadow-md animate-pulse cursor-pointer"
-                    >
-                      <Phone className="w-3.5 h-3.5" />
-                      <span>{t.call_ambulance_btn}</span>
-                    </button>
-                  )}
-                </div>
-
-                <p className="text-[10px] text-slate-500 text-center font-medium pt-1">
-                  ⚠️ {t.verification_warning}
-                </p>
-              </div>
+                );
+              })()
             ) : (
               <div className="bg-white rounded-3xl p-8 border border-slate-200 text-center space-y-4 shadow-sm">
                 <div className="w-16 h-16 bg-teal-50 text-teal-600 rounded-3xl flex items-center justify-center mx-auto text-2xl font-black">
@@ -1326,7 +1432,7 @@ export const PatientPortal = ({
                       </div>
 
                       {/* Card Action Buttons */}
-                      <div className="grid grid-cols-2 gap-2 pt-3 border-t border-slate-200">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-3 border-t border-slate-200">
                         <button
                           type="button"
                           onClick={() => {
@@ -1338,6 +1444,16 @@ export const PatientPortal = ({
                           <Calendar className="w-3.5 h-3.5" />
                           <span>Book OPD</span>
                         </button>
+                        <a
+                          href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${fac.name}, ${fac.address || `${fac.district}, Maharashtra`}`)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center justify-center space-x-1.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                          title="Calculate route and directions in Google Maps"
+                        >
+                          <Navigation className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>{language === 'mr' ? 'गुगल मॅप्स / दिशा' : language === 'hi' ? 'गूगल मैप्स दिशा' : 'Google Maps'}</span>
+                        </a>
                         {fac.phone ? (
                           <a
                             href={`tel:${fac.phone}`}
@@ -1349,7 +1465,7 @@ export const PatientPortal = ({
                         ) : (
                           <div className="flex items-center justify-center space-x-1.5 py-2.5 bg-slate-100 text-slate-500 border border-slate-200 rounded-xl text-xs font-semibold">
                             <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                            <span>In-person Walk-in</span>
+                            <span>Walk-in</span>
                           </div>
                         )}
                       </div>
@@ -1446,9 +1562,24 @@ export const PatientPortal = ({
                 />
               </div>
 
-              <div className="p-4 bg-teal-50/80 rounded-2xl border border-teal-200 text-teal-900 text-xs space-y-1">
-                <p>👤 <strong>Patient:</strong> {registeredPatient?.name} ({registeredPatient?.age} yrs, {registeredPatient?.phone})</p>
-                <p>🏥 <strong>Assigned Facility:</strong> {selectedFacilityForAppt || 'Selected Primary Care Center'}</p>
+              <div className="p-4 bg-teal-50/80 rounded-2xl border border-teal-200 text-teal-900 text-xs space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <p>👤 <strong>Patient:</strong> {registeredPatient?.name} ({registeredPatient?.age} yrs, {registeredPatient?.phone})</p>
+                    <p className="mt-0.5">🏥 <strong>Assigned Facility:</strong> {selectedFacilityForAppt || 'Selected Primary Care Center'}</p>
+                  </div>
+                  {selectedFacilityForAppt && (
+                    <a
+                      href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${selectedFacilityForAppt}, ${registeredPatient?.district || 'Maharashtra'}`)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-sm transition-all shrink-0 cursor-pointer"
+                    >
+                      <Navigation className="w-3.5 h-3.5" />
+                      <span>{language === 'mr' ? 'गुगल मॅप्सवर दिशा पहा' : language === 'hi' ? 'गूगल मैप्स पर देखें' : 'View on Google Maps'}</span>
+                    </a>
+                  )}
+                </div>
               </div>
 
               <button
@@ -1503,7 +1634,20 @@ export const PatientPortal = ({
                       <h5 className="font-extrabold text-slate-900 text-sm">{rec.title}</h5>
                       {rec.code && <p className="text-[11px] font-mono text-teal-800">Code: {rec.code}</p>}
                       {rec.doctor && <p className="text-slate-600"><strong>Practitioner:</strong> {rec.doctor}</p>}
-                      {rec.facility && <p className="text-slate-500"><strong>Facility:</strong> {rec.facility}</p>}
+                      {rec.facility && (
+                        <div className="flex items-center justify-between gap-2 text-slate-600">
+                          <p><strong>Facility:</strong> {rec.facility}</p>
+                          <a
+                            href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${rec.facility}, Maharashtra`)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center space-x-1 text-teal-700 hover:text-teal-900 font-bold text-[11px] underline"
+                          >
+                            <Navigation className="w-3 h-3 text-teal-600" />
+                            <span>{language === 'mr' ? 'गुगल मॅप्स' : language === 'hi' ? 'गूगल मैप्स' : 'Maps'}</span>
+                          </a>
+                        </div>
+                      )}
                       {rec.notes && <p className="text-slate-700 bg-white p-2.5 rounded-xl border border-teal-100">{rec.notes}</p>}
                       {rec.results && <p className="text-slate-700 bg-white p-2.5 rounded-xl border border-teal-100"><strong>Lab Results:</strong> {rec.results}</p>}
                       {rec.medications && (
@@ -1574,59 +1718,78 @@ export const PatientPortal = ({
             </div>
 
             <div className="space-y-4">
-              {referrals.map((ref) => {
-                const statuses = ['Pending', 'Accepted', 'Patient Arrived', 'Completed', 'Follow-up'];
-                const currentIdx = statuses.indexOf(ref.status);
+              {referrals.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 text-xs bg-slate-50 rounded-2xl space-y-2 border border-slate-200">
+                  <Send className="w-8 h-8 text-slate-300 mx-auto" />
+                  <p className="font-bold text-slate-700">No active referrals for {registeredPatient?.name || 'this patient'}</p>
+                  <p className="text-slate-400">When a doctor or health worker issues a referral, real-time tracking will appear here.</p>
+                </div>
+              ) : (
+                referrals.map((ref) => {
+                  const statuses = ['Pending', 'Accepted', 'Patient Arrived', 'Completed', 'Follow-up'];
+                  const currentIdx = statuses.indexOf(ref.status);
 
-                return (
-                  <div key={ref.id} className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div>
-                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
-                          ref.priority === 'P1' ? 'bg-red-600 text-white' : 'bg-amber-500 text-white'
-                        }`}>
-                          {ref.priority} {ref.urgency}
+                  return (
+                    <div key={ref.id} className="p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                            ref.priority === 'P1' ? 'bg-red-600 text-white' : 'bg-amber-500 text-white'
+                          }`}>
+                            {ref.priority} {ref.urgency}
+                          </span>
+                          <h4 className="text-base font-black text-slate-900 mt-1">
+                            {ref.patient_name} ({ref.age} yrs)
+                          </h4>
+                          <p className="text-xs text-slate-500">
+                            {ref.source_facility} &rarr; <strong className="text-teal-700">{ref.target_facility}</strong>
+                          </p>
+                        </div>
+
+                        <span className="text-xs font-extrabold bg-teal-100 text-teal-900 px-3 py-1 rounded-xl border border-teal-300">
+                          Status: {ref.status}
                         </span>
-                        <h4 className="text-base font-black text-slate-900 mt-1">
-                          {ref.patient_name} ({ref.age} yrs)
-                        </h4>
-                        <p className="text-xs text-slate-500">
-                          {ref.source_facility} &rarr; <strong className="text-teal-700">{ref.target_facility}</strong>
-                        </p>
                       </div>
 
-                      <span className="text-xs font-extrabold bg-teal-100 text-teal-900 px-3 py-1 rounded-xl border border-teal-300">
-                        Status: {ref.status}
-                      </span>
-                    </div>
+                      {/* Progression Bar */}
+                      <div className="grid grid-cols-5 gap-1.5 pt-2">
+                        {statuses.map((st, idx) => {
+                          const isDone = currentIdx >= idx;
+                          const isCurrent = currentIdx === idx;
+                          return (
+                            <div key={st} className="text-center space-y-1">
+                              <div className={`h-2 rounded-full transition-all ${
+                                isCurrent ? 'bg-teal-600 animate-pulse' : isDone ? 'bg-emerald-500' : 'bg-slate-200'
+                              }`} />
+                              <span className={`text-[10px] font-bold block truncate ${
+                                isDone ? 'text-teal-900' : 'text-slate-400'
+                              }`}>
+                                {st}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
 
-                    {/* Progression Bar */}
-                    <div className="grid grid-cols-5 gap-1.5 pt-2">
-                      {statuses.map((st, idx) => {
-                        const isDone = currentIdx >= idx;
-                        const isCurrent = currentIdx === idx;
-                        return (
-                          <div key={st} className="text-center space-y-1">
-                            <div className={`h-2 rounded-full transition-all ${
-                              isCurrent ? 'bg-teal-600 animate-pulse' : isDone ? 'bg-emerald-500' : 'bg-slate-200'
-                            }`} />
-                            <span className={`text-[10px] font-bold block truncate ${
-                              isDone ? 'text-teal-900' : 'text-slate-400'
-                            }`}>
-                              {st}
-                            </span>
-                          </div>
-                        );
-                      })}
+                      <div className="text-xs text-slate-600 bg-white p-3 rounded-xl border border-slate-200 space-y-1">
+                        <p><strong>Clinical Reason:</strong> {ref.reason}</p>
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+                          <span><strong>Transport:</strong> {ref.transport_mode}</span>
+                          <a
+                            href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${ref.target_facility}, Maharashtra`)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center space-x-1.5 px-3 py-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 rounded-xl font-bold text-xs border border-emerald-300 transition-colors"
+                          >
+                            <Navigation className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>{language === 'mr' ? 'रेफरल रुग्णालयाचा नकाशा' : language === 'hi' ? 'रेफरल अस्पताल का नक्शा' : 'Directions to Hospital'}</span>
+                          </a>
+                        </div>
+                      </div>
                     </div>
-
-                    <div className="text-xs text-slate-600 bg-white p-3 rounded-xl border border-slate-200">
-                      <strong>Clinical Reason:</strong> {ref.reason} <br />
-                      <strong>Transport:</strong> {ref.transport_mode}
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </div>
         </div>

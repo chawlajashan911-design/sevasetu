@@ -127,7 +127,7 @@ export const HospitalPortal = ({ language }) => {
       target_facility: hospitalName,
       urgency: 'Immediate (< 1 Hour)',
       reason: q.triage_reason,
-      transport_mode: '108 Emergency Ambulance',
+      transport_mode: 'Direct Referral Transit',
       status: 'Pending',
       created_at: q.created_at
     }))
@@ -363,7 +363,7 @@ export const HospitalPortal = ({ language }) => {
           <div className="border-b border-slate-100 pb-4">
             <h3 className="text-xl font-black text-slate-900">Emergency & High-Risk Case Board (P1 Critical)</h3>
             <p className="text-xs text-slate-500 font-medium">
-              Patients requiring immediate ICU/OT/Specialist readiness upon 108 Ambulance arrival
+              Patients requiring immediate ICU/OT/Specialist readiness upon patient arrival
             </p>
           </div>
 

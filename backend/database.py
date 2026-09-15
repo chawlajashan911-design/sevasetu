@@ -15,9 +15,20 @@ if not DATABASE_URL:
         "Set it to your Supabase PostgreSQL connection string."
     )
 
-# Fix for SQLAlchemy 2.0 which requires postgresql:// instead of postgres://
+# Fix for SQLAlchemy 2.0 which requires postgresql:// or postgresql+psycopg:// instead of postgres://
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+try:
+    import psycopg2
+except ImportError:
+    # If psycopg3 is installed, use postgresql+psycopg
+    try:
+        import psycopg
+        if DATABASE_URL.startswith("postgresql://"):
+            DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
+    except ImportError:
+        pass
 
 engine_kwargs = {
     "pool_pre_ping": True,

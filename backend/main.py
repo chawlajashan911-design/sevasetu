@@ -529,6 +529,7 @@ def evaluate_triage(req: TriageEvaluationRequest, db: Session = Depends(get_db))
         "clinical_reasoning": triage_result.get("clinical_reasoning"),
         "red_flag_warnings": triage_result.get("red_flag_warnings") or [],
         "recommended_investigations": triage_result.get("recommended_investigations") or [],
+        "translations": triage_result.get("translations"),
         "ai_model": triage_result.get("model_engine") or "Gemini 3.6 Flash + Clinical Rule Guardrail v2.0",
         "cached": False,
     }
@@ -546,11 +547,15 @@ def get_doctor_queue(
     priority: Optional[str] = None,
     village: Optional[str] = None,
     status: Optional[str] = None,
+    patient_id: Optional[int] = None,
+    patient_name: Optional[str] = None,
+    phone: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     """
     Returns prioritized patient queue for Doctor verification.
     Ordered by priority (P1 first, then P2, then P3), then timestamp.
+    Supports filtering by patient_id, patient_name, or phone for patient data isolation.
     """
     query = db.query(TriageRecord)
 
@@ -560,6 +565,12 @@ def get_doctor_queue(
         query = query.filter(TriageRecord.village.ilike(f"%{village}%"))
     if status and status != "All":
         query = query.filter(TriageRecord.status == status)
+    if patient_id is not None:
+        query = query.filter(TriageRecord.patient_id == patient_id)
+    if patient_name and patient_name != "All":
+        query = query.filter(TriageRecord.patient_name.ilike(f"%{patient_name}%"))
+    if phone:
+        query = query.filter(TriageRecord.phone == phone)
 
     # Custom priority ordering: P1 -> P2 -> P3
     priority_order = case(
@@ -732,12 +743,19 @@ def get_asha_incentives(asha_id: Optional[str] = None, db: Session = Depends(get
 
 # ----------------- Referrals -----------------
 @app.get("/api/referrals")
-def get_referrals(priority: Optional[str] = None, status: Optional[str] = None, db: Session = Depends(get_db)):
+def get_referrals(
+    priority: Optional[str] = None,
+    status: Optional[str] = None,
+    patient_name: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
     query = db.query(Referral)
     if priority and priority != "All":
         query = query.filter(Referral.priority == priority)
     if status and status != "All":
         query = query.filter(Referral.status == status)
+    if patient_name and patient_name != "All":
+        query = query.filter(Referral.patient_name.ilike(f"%{patient_name}%"))
 
     referrals = query.order_by(desc(Referral.created_at)).all()
     return [
@@ -770,7 +788,7 @@ def create_referral(req: ReferralCreate, db: Session = Depends(get_db)):
         target_facility=req.target_facility,
         urgency=req.urgency or "Immediate",
         reason=req.reason,
-        transport_mode=req.transport_mode or "108 Emergency Ambulance",
+        transport_mode=req.transport_mode or "Medical Transit",
         status=req.status or "Pending",
     )
     db.add(ref)
@@ -803,6 +821,8 @@ def get_appointments(
     facility: Optional[str] = None,
     doctor: Optional[str] = None,
     status: Optional[str] = None,
+    patient_name: Optional[str] = None,
+    phone: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     query = db.query(Appointment)
@@ -812,6 +832,10 @@ def get_appointments(
         query = query.filter(Appointment.doctor_name.ilike(f"%{doctor}%"))
     if status and status != "All":
         query = query.filter(Appointment.status == status)
+    if patient_name and patient_name != "All":
+        query = query.filter(Appointment.patient_name.ilike(f"%{patient_name}%"))
+    if phone:
+        query = query.filter(Appointment.phone == phone)
     return query.order_by(desc(Appointment.created_at)).all()
 
 

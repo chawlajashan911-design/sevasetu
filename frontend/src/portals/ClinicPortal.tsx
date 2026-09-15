@@ -122,7 +122,7 @@ export const ClinicPortal = ({
         target_facility: targetHospital,
         urgency: referralUrgency,
         reason: referralReason,
-        transport_mode: '108 Emergency Ambulance',
+        transport_mode: 'Standard Medical Transfer',
         status: 'Pending'
       });
       setReferralSuccessMsg(`Referral successfully dispatched to ${targetHospital}!`);

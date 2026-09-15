@@ -27,6 +27,8 @@ import {
   Phone
 } from 'lucide-react';
 
+import { getLocalizedClinicalData } from '../i18n/indicMedical';
+
 export const DoctorPortal = ({
   language,
   openTeleconsult
@@ -35,6 +37,13 @@ export const DoctorPortal = ({
 
   // Active view tab
   const [activeTab, setActiveTab] = useState('triage_queue');
+
+  // Gemini suggestions language selector: English / Hindi / Marathi
+  const [doctorGeminiLang, setDoctorGeminiLang] = useState(language || 'en');
+
+  useEffect(() => {
+    if (language) setDoctorGeminiLang(language);
+  }, [language]);
 
   // Queue & Records State
   const [queue, setQueue] = useState([]);
@@ -59,7 +68,7 @@ export const DoctorPortal = ({
   const [referralTarget, setReferralTarget] = useState('');
   const [referralUrgency, setReferralUrgency] = useState('Immediate (< 1 Hour)');
   const [referralReason, setReferralReason] = useState('Pre-eclampsia with elevated BP; requires higher tertiary obstetric management.');
-  const [referralTransport, setReferralTransport] = useState('108 Emergency Ambulance');
+  const [referralTransport, setReferralTransport] = useState('Hospital Transport Van');
   const [referralSuccessMsg, setReferralSuccessMsg] = useState(null);
 
   // Follow-up state
@@ -398,50 +407,98 @@ export const DoctorPortal = ({
                   <p className="text-slate-500 text-[11px] mt-1">Rule Engine: {selectedRecord.triage_reason}</p>
                 </div>
 
-                {/* Gemini AI Clinical Decision Support */}
-                <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50/90 to-blue-50/90 border border-blue-200 text-xs space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-1.5 font-black text-blue-900">
-                      <Sparkles className="w-4 h-4 text-indigo-600" />
-                      <span>AI Clinical Decision Support</span>
-                    </div>
-                    <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full border border-blue-200">
-                      {selectedRecord.ai_model || 'Gemini 3.6 Flash + Safety Guardrails'}
-                    </span>
-                  </div>
-
-                  {/* Differential Diagnoses */}
-                  {selectedRecord.differential_diagnosis && selectedRecord.differential_diagnosis.length > 0 && (
-                    <div className="space-y-1">
-                      <span className="text-[11px] font-bold text-slate-600 block">
-                        Differential Diagnoses (click to append to consultation notes):
-                      </span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {selectedRecord.differential_diagnosis.map((diag, idx) => (
-                          <button
-                            key={idx}
-                            type="button"
-                            onClick={() => {
-                              setDoctorNotes(prev => prev ? `${prev}; Suspected: ${diag}` : `Suspected: ${diag}`);
-                            }}
-                            className="px-2.5 py-1 bg-white hover:bg-blue-100 text-blue-900 border border-blue-200 rounded-lg text-xs font-semibold transition-all shadow-xs flex items-center space-x-1 cursor-pointer"
-                            title="Click to insert into Doctor Notes"
-                          >
-                            <span>+ {diag}</span>
-                          </button>
-                        ))}
+                {/* Gemini AI Clinical Decision Support with English / Hindi / Marathi Selector */}
+                {(() => {
+                  const localizedClinical = getLocalizedClinicalData(selectedRecord, doctorGeminiLang);
+                  return (
+                    <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50/90 to-blue-50/90 border border-blue-200 text-xs space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center space-x-1.5 font-black text-blue-900">
+                          <Sparkles className="w-4 h-4 text-indigo-600" />
+                          <span>AI Clinical Decision Support</span>
+                        </div>
+                        
+                        {/* Language Selection: English / Hindi / Marathi */}
+                        <div className="flex items-center bg-white/90 p-0.5 rounded-xl border border-blue-200 shadow-2xs">
+                          <span className="text-[10px] font-bold text-slate-500 px-1.5">AI Language:</span>
+                          {[
+                            { code: 'en', label: 'EN' },
+                            { code: 'hi', label: 'हिंदी' },
+                            { code: 'mr', label: 'मराठी' }
+                          ].map(({ code, label }) => (
+                            <button
+                              key={code}
+                              type="button"
+                              onClick={() => setDoctorGeminiLang(code)}
+                              className={`px-2 py-0.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                                doctorGeminiLang === code
+                                  ? 'bg-blue-600 text-white shadow-xs'
+                                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
 
-                  {/* Clinical Reasoning */}
-                  {selectedRecord.clinical_reasoning && (
-                    <div className="text-[11px] text-slate-700 bg-white/70 p-2.5 rounded-xl border border-blue-100 leading-relaxed font-medium">
-                      <strong className="text-slate-900">AI Clinical Rationale: </strong>
-                      {selectedRecord.clinical_reasoning}
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 font-semibold border-b border-blue-100 pb-1.5">
+                        <span className="text-blue-700 bg-blue-100/80 px-2 py-0.5 rounded-full border border-blue-200 font-bold">
+                          {selectedRecord.ai_model || 'Gemini 3.6 Flash + Safety Guardrails'}
+                        </span>
+                        <span>Confidence: {((selectedRecord.confidence_score || 0.85) * 100).toFixed(0)}%</span>
+                      </div>
+
+                      {/* Differential Diagnoses */}
+                      {localizedClinical.differential && localizedClinical.differential.length > 0 && (
+                        <div className="space-y-1">
+                          <span className="text-[11px] font-bold text-slate-700 block">
+                            {doctorGeminiLang === 'mr' ? 'संभाव्य विभेदक निदान (क्लिक करून नोट्समध्ये जोडा):' : doctorGeminiLang === 'hi' ? 'संभावित विभेदक निदान (क्लिक करके नोट्स में जोड़ें):' : 'Differential Diagnoses (click to append to consultation notes):'}
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {localizedClinical.differential.map((diag, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => {
+                                  setDoctorNotes(prev => prev ? `${prev}; Suspected: ${diag}` : `Suspected: ${diag}`);
+                                }}
+                                className="px-2.5 py-1 bg-white hover:bg-blue-100 text-blue-900 border border-blue-200 rounded-lg text-xs font-semibold transition-all shadow-xs flex items-center space-x-1 cursor-pointer"
+                                title="Click to insert into Doctor Notes"
+                              >
+                                <span>+ {diag}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Clinical Reasoning */}
+                      {localizedClinical.reasoning && (
+                        <div className="text-[11px] text-slate-700 bg-white/80 p-2.5 rounded-xl border border-blue-100 leading-relaxed font-medium">
+                          <strong className="text-slate-900">
+                            {doctorGeminiLang === 'mr' ? 'AI वैद्यकीय तर्क (Clinical Rationale): ' : doctorGeminiLang === 'hi' ? 'AI नैदानिक तर्क (Clinical Rationale): ' : 'AI Clinical Rationale: '}
+                          </strong>
+                          {localizedClinical.reasoning}
+                        </div>
+                      )}
+
+                      {/* Red Flags & Investigations if available */}
+                      {localizedClinical.redFlags && localizedClinical.redFlags.length > 0 && (
+                        <div className="p-2.5 bg-rose-50/90 rounded-xl border border-rose-200 text-xs text-rose-950 space-y-1">
+                          <span className="font-bold text-rose-900 text-[11px] uppercase">
+                            🚨 {doctorGeminiLang === 'mr' ? 'धोक्याची लक्षणे:' : doctorGeminiLang === 'hi' ? 'खतरे के संकेत:' : 'Danger Signs / Red Flags:'}
+                          </span>
+                          <ul className="list-disc list-inside text-[11px] text-rose-800">
+                            {localizedClinical.redFlags.map((rf, i) => (
+                              <li key={i}>{rf}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  );
+                })()}
 
                 {/* Consultation Notes & Verification Form */}
                 <div className="space-y-4 pt-2">
@@ -677,9 +734,9 @@ export const DoctorPortal = ({
                   onChange={(e) => setReferralTransport(e.target.value)}
                   className="w-full p-3.5 bg-slate-50 rounded-2xl border border-slate-300 text-sm font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
                 >
-                  <option value="108 Emergency Ambulance">108 Emergency Ambulance (with Paramedic)</option>
-                  <option value="PHC Van / Ambulance">PHC Van / Local Ambulance</option>
+                  <option value="Hospital Transport Van">Hospital Transport Van</option>
                   <option value="Self / Family Transport">Self / Family Transport</option>
+                  <option value="Public Transit / Escort">Public Transit / Escort</option>
                 </select>
               </div>
             </div>

@@ -217,15 +217,17 @@ export const Navbar = ({
               ))}
             </div>
 
-            {/* Emergency SOS Button */}
-            <button
-              onClick={openSOS}
-              className="flex items-center space-x-1.5 sm:space-x-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 active:scale-95 text-white px-3 sm:px-4 py-2 rounded-xl font-extrabold text-xs sm:text-sm shadow-md shadow-red-500/30 transition-all border border-red-500 animate-pulse shrink-0 cursor-pointer"
-              title="Emergency Distress Signal"
-            >
-              <AlertOctagon className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-              <span className="tracking-wide">{t.sos_btn}</span>
-            </button>
+            {/* Emergency SOS Button (Citizen / Patient / Field Health Worker Only) */}
+            {currentRole !== 'hospital' && currentRole !== 'doctor' && currentRole !== 'clinic' && (
+              <button
+                onClick={openSOS}
+                className="flex items-center space-x-1.5 sm:space-x-2 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 active:scale-95 text-white px-3 sm:px-4 py-2 rounded-xl font-extrabold text-xs sm:text-sm shadow-md shadow-red-500/30 transition-all border border-red-500 animate-pulse shrink-0 cursor-pointer"
+                title="Emergency Distress Signal"
+              >
+                <AlertOctagon className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                <span className="tracking-wide">{t.sos_btn}</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

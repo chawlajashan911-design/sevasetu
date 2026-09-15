@@ -351,11 +351,20 @@ export const api = {
   },
 
   // Doctor Queue
-  async getDoctorQueue(priority, status) {
+  async getDoctorQueue(priorityOrParams, status) {
     try {
       const params = new URLSearchParams();
-      if (priority && priority !== 'All') params.append('priority', priority);
-      if (status && status !== 'All') params.append('status', status);
+      if (typeof priorityOrParams === 'object' && priorityOrParams !== null) {
+        if (priorityOrParams.priority && priorityOrParams.priority !== 'All') params.append('priority', priorityOrParams.priority);
+        if (priorityOrParams.status && priorityOrParams.status !== 'All') params.append('status', priorityOrParams.status);
+        if (priorityOrParams.village && priorityOrParams.village !== 'All') params.append('village', priorityOrParams.village);
+        if (priorityOrParams.patient_id) params.append('patient_id', String(priorityOrParams.patient_id));
+        if (priorityOrParams.patient_name && priorityOrParams.patient_name !== 'All') params.append('patient_name', priorityOrParams.patient_name);
+        if (priorityOrParams.phone) params.append('phone', priorityOrParams.phone);
+      } else {
+        if (priorityOrParams && priorityOrParams !== 'All') params.append('priority', priorityOrParams);
+        if (status && status !== 'All') params.append('status', status);
+      }
       
       const res = await fetch(`${API_BASE}/triage/queue?${params.toString()}`);
       if (!res.ok) throw new Error('Doctor queue fetch failed');
@@ -429,9 +438,12 @@ export const api = {
   },
 
   // Referrals
-  async getReferrals(status) {
+  async getReferrals(status, dummy, patient_name) {
     try {
-      const query = status && status !== 'All' ? `?status=${status}` : '';
+      const params = new URLSearchParams();
+      if (status && status !== 'All') params.append('status', status);
+      if (patient_name && patient_name !== 'All') params.append('patient_name', patient_name);
+      const query = params.toString() ? `?${params.toString()}` : '';
       const res = await fetch(`${API_BASE}/referrals${query}`);
       if (!res.ok) throw new Error('Referrals fetch failed');
       return await res.json();
@@ -461,12 +473,14 @@ export const api = {
   },
 
   // Appointments
-  async getAppointments(facility, doctor, status) {
+  async getAppointments(facility, doctor, status, patient_name, phone) {
     try {
       const params = new URLSearchParams();
       if (facility && facility !== 'All') params.append('facility', facility);
       if (doctor && doctor !== 'All') params.append('doctor', doctor);
       if (status && status !== 'All') params.append('status', status);
+      if (patient_name && patient_name !== 'All') params.append('patient_name', patient_name);
+      if (phone) params.append('phone', phone);
 
       const res = await fetch(`${API_BASE}/appointments?${params.toString()}`);
       if (!res.ok) throw new Error('Appointments fetch failed');

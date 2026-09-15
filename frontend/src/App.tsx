@@ -90,7 +90,19 @@ const AppContent = () => {
     setCurrentUser(null);
     setSelectedRoleForLogin(null);
     localStorage.removeItem('sevasetu_user');
-    navigate('/');
+    localStorage.removeItem('sevasetu_token');
+    navigate('/', { replace: true });
+  };
+
+  // Helper to get dashboard path for role
+  const getRoleDashboardPath = (role) => {
+    if (role === 'patient') return '/patient';
+    if (role === 'doctor') return '/doctor';
+    if (role === 'hospital') return '/hospital';
+    if (role === 'clinic') return '/clinic';
+    if (role === 'health_worker') return '/health-worker';
+    if (role === 'admin') return '/admin';
+    return null;
   };
 
   return (
@@ -100,17 +112,21 @@ const AppContent = () => {
 
       <React.Suspense fallback={<FallbackLoader />}>
         <Routes>
-        {/* Route 1: Welcome & Role Selection Page */}
+        {/* Route 1: Welcome & Role Selection Page (Redirects automatically if already logged in) */}
         <Route
           path="/"
           element={
-            <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-6">
-              <RoleSelectionScreen
-                language={language}
-                setLanguage={setLanguage}
-                onSelectRole={handleSelectRole}
-              />
-            </main>
+            currentUser?.role && getRoleDashboardPath(currentUser.role) ? (
+              <Navigate to={getRoleDashboardPath(currentUser.role)} replace />
+            ) : (
+              <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-6">
+                <RoleSelectionScreen
+                  language={language}
+                  setLanguage={setLanguage}
+                  onSelectRole={handleSelectRole}
+                />
+              </main>
+            )
           }
         />
 
@@ -133,6 +149,7 @@ const AppContent = () => {
               />
               <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-6">
                 <PatientPortal
+                  currentUser={currentUser}
                   language={language}
                   openSOS={() => setIsSOSOpen(true)}
                   openAbha={(p) => setSelectedPatientForAbha(p)}
@@ -163,6 +180,7 @@ const AppContent = () => {
               />
               <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-6">
                 <DoctorPortal
+                  currentUser={currentUser}
                   language={language}
                   openTeleconsult={(r) => setSelectedRecordForTeleconsult(r)}
                 />
@@ -190,6 +208,7 @@ const AppContent = () => {
               />
               <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-6">
                 <ClinicPortal
+                  currentUser={currentUser}
                   language={language}
                   openTeleconsult={(r) => setSelectedRecordForTeleconsult(r)}
                 />
@@ -217,6 +236,7 @@ const AppContent = () => {
               />
               <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-6">
                 <HospitalPortal
+                  currentUser={currentUser}
                   language={language}
                 />
               </main>
@@ -243,6 +263,7 @@ const AppContent = () => {
               />
               <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-6">
                 <AshaPortal
+                  currentUser={currentUser}
                   language={language}
                   isOffline={isOffline}
                   pendingSyncCount={pendingCount}
@@ -271,6 +292,7 @@ const AppContent = () => {
               />
               <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-6">
                 <AdminPortal
+                  currentUser={currentUser}
                   language={language}
                 />
               </main>

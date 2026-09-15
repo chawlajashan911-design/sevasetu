@@ -63,6 +63,7 @@ class TriageEvaluationResponse(BaseModel):
     clinical_reasoning: Optional[str] = None
     red_flag_warnings: List[str] = []
     recommended_investigations: List[str] = []
+    translations: Optional[Dict[str, Any]] = None
     ai_model: Optional[str] = "Gemini 3.6 Flash + Clinical Rule Guardrail v2.0"
     cached: Optional[bool] = False
 

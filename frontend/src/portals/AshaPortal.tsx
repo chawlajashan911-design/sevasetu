@@ -29,6 +29,7 @@ import {
   CheckCircle2,
   Sparkles
 } from 'lucide-react';
+import { getLocalizedClinicalData } from '../i18n/indicMedical';
 
 export const AshaPortal = ({
   language,
@@ -42,6 +43,13 @@ export const AshaPortal = ({
 
   // Active view tab
   const [activeTab, setActiveTab] = useState('screening');
+
+  // Gemini suggestions language selector: English / Hindi / Marathi
+  const [ashaGeminiLang, setAshaGeminiLang] = useState(language || 'mr');
+
+  useEffect(() => {
+    if (language) setAshaGeminiLang(language);
+  }, [language]);
 
   // Form State for ASHA Screening
   const [patientName, setPatientName] = useState('');
@@ -728,90 +736,121 @@ export const AshaPortal = ({
       )}
 
       {/* AI Screening Result Modal */}
-      {screeningResultModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center space-x-2">
-                <span className={`text-xs font-black uppercase px-3 py-1 rounded-full text-white shadow-sm ${
-                  screeningResultModal.priority === 'P1' ? 'bg-red-600 animate-pulse' : screeningResultModal.priority === 'P2' ? 'bg-amber-600' : 'bg-emerald-600'
-                }`}>
-                  {screeningResultModal.priority} Priority
-                </span>
-                <span className="text-xs font-bold text-slate-500">
-                  {screeningResultModal.patient_name}
-                </span>
+      {screeningResultModal && (() => {
+        const localizedClinical = getLocalizedClinicalData(screeningResultModal, ashaGeminiLang);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+            <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center space-x-2">
+                  <span className={`text-xs font-black uppercase px-3 py-1 rounded-full text-white shadow-sm ${
+                    screeningResultModal.priority === 'P1' ? 'bg-red-600 animate-pulse' : screeningResultModal.priority === 'P2' ? 'bg-amber-600' : 'bg-emerald-600'
+                  }`}>
+                    {screeningResultModal.priority} Priority
+                  </span>
+                  <span className="text-xs font-bold text-slate-500">
+                    {screeningResultModal.patient_name}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setScreeningResultModal(null)}
+                  className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold text-sm cursor-pointer"
+                >
+                  ✕
+                </button>
               </div>
-              <button
-                onClick={() => setScreeningResultModal(null)}
-                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold text-sm cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
 
-            <div className="flex items-center space-x-1.5 text-[11px] font-bold text-purple-800 bg-purple-100/80 px-2.5 py-1 rounded-xl border border-purple-200">
-              <Sparkles className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-              <span>{screeningResultModal.ai_model || 'Gemini 3.6 Flash Clinical AI'}</span>
-            </div>
+              {/* Model info & Trilingual Language Selector */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center space-x-1.5 text-[11px] font-bold text-purple-800 bg-purple-100/80 px-2.5 py-1 rounded-xl border border-purple-200">
+                  <Sparkles className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                  <span>{screeningResultModal.ai_model || 'Gemini 3.6 Flash Clinical AI'}</span>
+                </div>
 
-            {/* Differential Diagnosis */}
-            {screeningResultModal.differential_diagnosis && screeningResultModal.differential_diagnosis.length > 0 && (
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5">
-                <p className="text-[11px] font-black uppercase tracking-wider text-slate-700">
-                  🩺 Suspected Differential Conditions:
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {screeningResultModal.differential_diagnosis.map((diag, i) => (
-                    <span key={i} className="px-2.5 py-1 bg-white text-slate-800 text-[11px] font-bold rounded-lg border border-slate-300 shadow-xs">
-                      {diag}
-                    </span>
+                {/* Language Selection: English / Hindi / Marathi */}
+                <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 shadow-2xs">
+                  <span className="text-[10px] font-bold text-slate-500 px-1.5">Language:</span>
+                  {[
+                    { code: 'en', label: 'English' },
+                    { code: 'hi', label: 'हिंदी' },
+                    { code: 'mr', label: 'मराठी' }
+                  ].map(({ code, label }) => (
+                    <button
+                      key={code}
+                      type="button"
+                      onClick={() => setAshaGeminiLang(code)}
+                      className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        ashaGeminiLang === code
+                          ? 'bg-purple-700 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                      }`}
+                    >
+                      {label}
+                    </button>
                   ))}
                 </div>
               </div>
-            )}
 
-            {/* Clinical Reasoning */}
-            {screeningResultModal.clinical_reasoning && (
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-700">
-                <span className="font-bold text-slate-900 block mb-0.5">Clinical Impression:</span>
-                <p className="text-[11px] leading-relaxed text-slate-600 font-medium">{screeningResultModal.clinical_reasoning}</p>
-              </div>
-            )}
+              {/* Differential Diagnosis */}
+              {localizedClinical.differential && localizedClinical.differential.length > 0 && (
+                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5">
+                  <p className="text-[11px] font-black uppercase tracking-wider text-slate-700">
+                    🩺 {ashaGeminiLang === 'mr' ? 'संभाव्य निदान (Differential Diagnosis):' : ashaGeminiLang === 'hi' ? 'संभावित निदान (Differential Diagnosis):' : 'Suspected Differential Conditions:'}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {localizedClinical.differential.map((diag, i) => (
+                      <span key={i} className="px-2.5 py-1 bg-white text-slate-800 text-[11px] font-bold rounded-lg border border-slate-300 shadow-xs">
+                        {diag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-            {/* Red Flag Warnings */}
-            {screeningResultModal.red_flag_warnings && screeningResultModal.red_flag_warnings.length > 0 && (
-              <div className="p-3 bg-rose-50/90 rounded-2xl border border-rose-200 text-xs text-rose-950 space-y-1">
-                <span className="font-black text-rose-900 text-[11px] uppercase tracking-wide">
-                  🚨 Danger Signs to Watch in Village:
+              {/* Clinical Reasoning */}
+              {localizedClinical.reasoning && (
+                <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs text-slate-700">
+                  <span className="font-bold text-slate-900 block mb-0.5">
+                    {ashaGeminiLang === 'mr' ? 'वैद्यकीय विश्लेषण (Clinical Impression):' : ashaGeminiLang === 'hi' ? 'नैदानिक निष्कर्ष (Clinical Impression):' : 'Clinical Impression:'}
+                  </span>
+                  <p className="text-[11px] leading-relaxed text-slate-600 font-medium">{localizedClinical.reasoning}</p>
+                </div>
+              )}
+
+              {/* Red Flag Warnings */}
+              {localizedClinical.redFlags && localizedClinical.redFlags.length > 0 && (
+                <div className="p-3 bg-rose-50/90 rounded-2xl border border-rose-200 text-xs text-rose-950 space-y-1">
+                  <span className="font-black text-rose-900 text-[11px] uppercase tracking-wide">
+                    🚨 {ashaGeminiLang === 'mr' ? 'गावात त्वरित लक्ष देण्याची धोक्याची लक्षणे:' : ashaGeminiLang === 'hi' ? 'गांव में ध्यान देने योग्य खतरे के संकेत:' : 'Danger Signs to Watch in Village:'}
+                  </span>
+                  <ul className="list-disc list-inside text-[11px] space-y-0.5 text-rose-800 font-medium">
+                    {localizedClinical.redFlags.map((flag, i) => (
+                      <li key={i}>{flag}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Action Guidance */}
+              <div className="p-3.5 bg-teal-50 rounded-2xl border border-teal-200 text-xs text-teal-950 space-y-1">
+                <span className="font-bold text-teal-900 text-[11px] uppercase tracking-wide">
+                  {ashaGeminiLang === 'mr' ? 'आशा सेविकेसाठी त्वरित कृती सूचना:' : ashaGeminiLang === 'hi' ? 'आशा कार्यकर्ता के लिए तत्काल कार्रवाई निर्देश:' : 'Immediate Action for ASHA Worker:'}
                 </span>
-                <ul className="list-disc list-inside text-[11px] space-y-0.5 text-rose-800 font-medium">
-                  {screeningResultModal.red_flag_warnings.map((flag, i) => (
-                    <li key={i}>{flag}</li>
-                  ))}
-                </ul>
+                <p className="font-medium text-[11px] text-teal-800">
+                  {localizedClinical.action || screeningResultModal.recommended_action || (screeningResultModal.priority === 'P1' ? 'Arrange immediate medical transfer.' : 'Advise rest, hydration, and visit PHC OPD.')}
+                </p>
               </div>
-            )}
 
-            {/* Action Guidance */}
-            <div className="p-3 bg-teal-50 rounded-2xl border border-teal-200 text-xs text-teal-950 space-y-1">
-              <span className="font-bold text-teal-900 text-[11px] uppercase tracking-wide">
-                Immediate Action for ASHA Worker:
-              </span>
-              <p className="font-medium text-[11px] text-teal-800">
-                {screeningResultModal.recommended_action || (screeningResultModal.priority === 'P1' ? 'Alert 108 Emergency Ambulance immediately.' : 'Advise rest, hydration, and visit PHC OPD.')}
-              </p>
+              <button
+                onClick={() => setScreeningResultModal(null)}
+                className="w-full py-3 bg-purple-700 hover:bg-purple-800 text-white rounded-xl font-black text-xs shadow-md transition-all cursor-pointer"
+              >
+                Done / Screen Next Patient
+              </button>
             </div>
-
-            <button
-              onClick={() => setScreeningResultModal(null)}
-              className="w-full py-3 bg-purple-700 hover:bg-purple-800 text-white rounded-xl font-black text-xs shadow-md transition-all cursor-pointer"
-            >
-              Done / Screen Next Patient
-            </button>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };
