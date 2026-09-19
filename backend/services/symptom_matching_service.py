@@ -793,6 +793,383 @@ Return STRICT JSON only, with this exact schema (no markdown, no other keys):
             ranked_hospitals=ranked_hospitals,
         )
 
+    def map_differential_to_speciality_and_resources(
+        self,
+        differential_diagnosis: List[str],
+        symptoms: Optional[str] = None
+    ) -> Tuple[List[SpecialityConfidence], List[str], List[str]]:
+        """
+        Fixed lookup mapping AI differential impressions / keywords to DB speciality enums,
+        suggested tests, and medicine categories.
+        Falls back cleanly to 'General Medicine'.
+        """
+        combined_text = " ".join(differential_diagnosis or []).lower()
+        if symptoms:
+            combined_text += " " + symptoms.lower()
+
+        matched_specialities: List[Tuple[str, float]] = []
+        suggested_tests_set: List[str] = []
+        medicine_categories_set: List[str] = []
+
+        mapping_rules = [
+            (
+                ("cardio", "coronary", "angina", "myocardial", "infarct", "hypertension", "arrhythmia", "heart failure", "chest pain", "cardiac", "ischemic", "pericarditis", "acs"),
+                "Cardiology",
+                ["ECG (12-Lead)", "Lipid Profile", "Complete Blood Count (CBC)", "Serum Electrolytes"],
+                ["Cardiac & Antianginal", "Antihypertensives", "Analgesics & Antipyretics"],
+            ),
+            (
+                ("urti", "bronchit", "pneumonia", "asthma", "copd", "cough", "wheez", "respiratory", "hypoxemia", "pharyngitis", "laryngitis", "tuberculosis", "pleur", "tracheobronchitis"),
+                "Pulmonology",
+                ["Chest X-Ray", "Complete Blood Count (CBC)"],
+                ["Respiratory & Bronchodilators", "Antibiotics", "Analgesics & Antipyretics"],
+            ),
+            (
+                ("pediatric", "neonatal", "infant", "child", "measles", "croup", "febrile convulsion", "mumps", "rubella"),
+                "Pediatrics",
+                ["Complete Blood Count (CBC)", "Urine Routine & Microscopy"],
+                ["Analgesics & Antipyretics", "Antibiotics", "IV Fluids & Electrolytes"],
+            ),
+            (
+                ("fracture", "joint", "bone", "arthritis", "sprain", "dislocation", "orthopedic", "trauma", "knee", "spine", "spondylitis", "back pain"),
+                "Orthopedics",
+                ["Chest X-Ray", "Serum Electrolytes"],
+                ["Analgesics & Antipyretics", "Antacids & PPIs"],
+            ),
+            (
+                ("maternal", "pregnan", "obstetric", "gynecol", "eclampsia", "labor", "postpartum", "pelvic", "uterine", "vaginal", "antenatal", "preeclampsia", "gestational"),
+                "Obstetrics & Gynecology",
+                ["Ultrasound Abdomen", "Complete Blood Count (CBC)", "Urine Routine & Microscopy"],
+                ["Analgesics & Antipyretics", "Antibiotics", "IV Fluids & Electrolytes"],
+            ),
+            (
+                ("dermat", "skin", "eczema", "psoriasis", "rash", "urticaria", "fungal", "scabies", "acne", "cellulitis", "impetigo"),
+                "Dermatology",
+                ["Complete Blood Count (CBC)"],
+                ["Dermatologicals", "Antihistamines"],
+            ),
+            (
+                ("stroke", "seizure", "epilepsy", "neuropath", "headache", "migraine", "meningitis", "encephalitis", "paralysis", "cva", "transient ischemic", "syncope", "neurology"),
+                "Neurology",
+                ["CT Brain", "Blood Glucose (Fasting/PP)", "Serum Electrolytes"],
+                ["Analgesics & Antipyretics", "Antihypertensives"],
+            ),
+            (
+                ("ophthalm", "eye", "cataract", "glaucoma", "conjunctivitis", "vision", "cornea", "retin", "blepharitis"),
+                "Ophthalmology",
+                ["Blood Glucose (Fasting/PP)"],
+                ["Analgesics & Antipyretics", "Antihistamines"],
+            ),
+            (
+                ("otitis", "sinusitis", "tonsillitis", "ear", "nose", "throat", "epistaxis", "rhinitis", "vertigo", "ent"),
+                "ENT",
+                ["Complete Blood Count (CBC)"],
+                ["Antibiotics", "Antihistamines", "Analgesics & Antipyretics"],
+            ),
+            (
+                ("gastro", "gastritis", "ulcer", "diarrhea", "dysentery", "vomiting", "abdomen", "hepatitis", "jaundice", "cholecystitis", "appendicitis", "colitis", "pancreatitis", "acid peptic", "gastroenteritis", "gerd", "enteric"),
+                "Gastroenterology",
+                ["Ultrasound Abdomen", "Liver Function Test (LFT)", "Complete Blood Count (CBC)"],
+                ["Antacids & PPIs", "Antiemetics", "IV Fluids & Electrolytes"],
+            ),
+            (
+                ("nephr", "renal", "kidney", "uti", "urinary tract infection", "calculus", "hematuria", "glomerulo", "pyelonephritis"),
+                "Nephrology",
+                ["Kidney Function Test (KFT)", "Urine Routine & Microscopy", "Serum Electrolytes"],
+                ["Antibiotics", "Antihypertensives", "IV Fluids & Electrolytes"],
+            ),
+            (
+                ("hernia", "abscess", "wound", "laceration", "peritonitis", "surgical", "obstruction", "fissure", "fistula"),
+                "General Surgery",
+                ["Complete Blood Count (CBC)", "Ultrasound Abdomen"],
+                ["Antibiotics", "Analgesics & Antipyretics", "IV Fluids & Electrolytes"],
+            ),
+            (
+                ("psychiatr", "depression", "anxiety", "psychosis", "bipolar", "schizo", "insomnia", "panic"),
+                "Psychiatry",
+                ["Complete Blood Count (CBC)", "Thyroid Profile (T3, T4, TSH)"],
+                ["Analgesics & Antipyretics"],
+            ),
+        ]
+
+        for keywords, spec_name, tests, meds in mapping_rules:
+            if any(kw in combined_text for kw in keywords):
+                matched_specialities.append((spec_name, 0.95 if len(matched_specialities) == 0 else 0.85))
+                for t in tests:
+                    if t not in suggested_tests_set:
+                        suggested_tests_set.append(t)
+                for m in meds:
+                    if m not in medicine_categories_set:
+                        medicine_categories_set.append(m)
+
+        if not matched_specialities:
+            matched_specialities = [("General Medicine", 0.90)]
+            suggested_tests_set = ["Complete Blood Count (CBC)", "Blood Glucose (Fasting/PP)", "Urine Routine & Microscopy"]
+            medicine_categories_set = ["Analgesics & Antipyretics", "Antibiotics", "Antacids & PPIs"]
+
+        specialities = [
+            SpecialityConfidence(name=name, confidence=conf)
+            for name, conf in matched_specialities[:2]
+        ]
+
+        return specialities, suggested_tests_set[:4], medicine_categories_set[:4]
+
+    def rank_triage_hospitals_live(
+        self,
+        db: Session,
+        differential_diagnosis: List[str],
+        priority: str,
+        symptoms: Optional[str] = None,
+        patient_lat: Optional[float] = None,
+        patient_lng: Optional[float] = None,
+        patient_district: Optional[str] = None,
+        limit: int = 3,
+    ) -> List[HospitalMatchResult]:
+        """
+        Live query matching hospitals for triage evaluation without extra Gemini call.
+        Ranking hierarchy: doctor availability (50%) > distance (30%) > stock (20%).
+        """
+        specs, tests, meds = self.map_differential_to_speciality_and_resources(
+            differential_diagnosis=differential_diagnosis,
+            symptoms=symptoms
+        )
+
+        urgency_map = {"P1": "EMERGENCY", "P2": "URGENT", "P3": "ROUTINE"}
+        urgency = urgency_map.get(priority, "ROUTINE")
+
+        # Create lightweight assessment object to leverage live DB scoring
+        assessment = SymptomAssessment(
+            urgency=urgency,
+            specialities=specs,
+            suggested_tests=tests,
+            medicine_categories=meds,
+            summary=f"Triage facility match for {priority} priority and {specs[0].name} consultation.",
+            cached=False,
+            fallback_used=True,
+        )
+
+        # 1. Reference coordinates
+        ref_lat = patient_lat
+        ref_lng = patient_lng
+        if ref_lat is None or ref_lng is None:
+            dist_key = (patient_district or "").lower().strip()
+            if dist_key in DISTRICT_CENTERS:
+                ref_lat, ref_lng = DISTRICT_CENTERS[dist_key]
+            else:
+                ref_lat, ref_lng = DISTRICT_CENTERS["pune"]
+
+        # 2. Live DB queries
+        h_query = db.query(Hospital)
+        if patient_district:
+            dist_hospitals = h_query.filter(
+                or_(
+                    func.lower(Hospital.district) == patient_district.lower().strip(),
+                    Hospital.district == None
+                )
+            ).all()
+            hospitals = dist_hospitals if len(dist_hospitals) >= 3 else h_query.limit(100).all()
+        else:
+            hospitals = h_query.limit(100).all()
+
+        if not hospitals:
+            return []
+
+        all_doctors = db.query(HospitalDoctor).filter(HospitalDoctor.is_active == True).all()
+        all_tests = db.query(HospitalTest).filter(HospitalTest.is_available == True).all()
+        all_pharmacy = db.query(HospitalPharmacyItem).all()
+        all_inventory = db.query(Inventory).all()
+
+        doctors_by_hosp: Dict[str, List[HospitalDoctor]] = {}
+        doctors_by_name: Dict[str, List[HospitalDoctor]] = {}
+        for d in all_doctors:
+            if d.hospital_id:
+                doctors_by_hosp.setdefault(d.hospital_id, []).append(d)
+            if d.hospital_name:
+                doctors_by_name.setdefault(d.hospital_name.lower().strip(), []).append(d)
+
+        tests_by_hosp: Dict[str, List[HospitalTest]] = {}
+        tests_by_name: Dict[str, List[HospitalTest]] = {}
+        for t in all_tests:
+            if t.hospital_id:
+                tests_by_hosp.setdefault(t.hospital_id, []).append(t)
+            if t.hospital_name:
+                tests_by_name.setdefault(t.hospital_name.lower().strip(), []).append(t)
+
+        pharmacy_by_hosp: Dict[str, List[HospitalPharmacyItem]] = {}
+        for p in all_pharmacy:
+            if p.hospital_id:
+                pharmacy_by_hosp.setdefault(p.hospital_id, []).append(p)
+
+        inventory_by_facility: Dict[str, List[Inventory]] = {}
+        for inv in all_inventory:
+            if inv.facility_name:
+                inventory_by_facility.setdefault(inv.facility_name.lower().strip(), []).append(inv)
+
+        target_specialities = {s.name.lower(): s.confidence for s in specs}
+        suggested_tests_lower = [t.lower() for t in tests]
+        suggested_meds_lower = [m.lower() for m in meds]
+
+        scored_facilities: List[HospitalMatchResult] = []
+
+        for h in hospitals:
+            h_id = h.id
+            h_name_lower = (h.name or "").lower().strip()
+
+            h_docs = doctors_by_hosp.get(h_id, []) or doctors_by_name.get(h_name_lower, [])
+            h_tests = tests_by_hosp.get(h_id, []) or tests_by_name.get(h_name_lower, [])
+            h_pharm = pharmacy_by_hosp.get(h_id, [])
+            h_inv = inventory_by_facility.get(h_name_lower, [])
+
+            # Doctor Availability Score (Max 50 pts)
+            doctor_score = 0.0
+            best_doc: Optional[DoctorMatchInfo] = None
+
+            matched_active_docs: List[Tuple[HospitalDoctor, float]] = []
+            for doc in h_docs:
+                doc_spec = (doc.speciality or "").lower().strip()
+                for t_spec, conf in target_specialities.items():
+                    if t_spec in doc_spec or doc_spec in t_spec:
+                        matched_active_docs.append((doc, conf))
+                        break
+
+            if matched_active_docs:
+                matched_active_docs.sort(key=lambda x: x[1], reverse=True)
+                top_doc, conf = matched_active_docs[0]
+                next_slot_str = self._determine_next_slot(top_doc.availability_slots)
+                slot_bonus = 12.0 if next_slot_str else 8.0
+                doctor_score = round(min(50.0, (conf * 38.0) + slot_bonus), 1)
+                best_doc = DoctorMatchInfo(
+                    id=top_doc.id,
+                    name=top_doc.name,
+                    speciality=top_doc.speciality,
+                    next_slot=next_slot_str,
+                    qualification=top_doc.qualification,
+                    experience_years=top_doc.experience_years or 0,
+                )
+            else:
+                gen_med_docs = [d for d in h_docs if "general" in (d.speciality or "").lower() or "medicine" in (d.speciality or "").lower()]
+                if gen_med_docs:
+                    top_gen = gen_med_docs[0]
+                    next_slot_str = self._determine_next_slot(top_gen.availability_slots)
+                    doctor_score = 25.0
+                    best_doc = DoctorMatchInfo(
+                        id=top_gen.id,
+                        name=top_gen.name,
+                        speciality=top_gen.speciality,
+                        next_slot=next_slot_str,
+                        qualification=top_gen.qualification,
+                        experience_years=top_gen.experience_years or 0,
+                    )
+                elif h.doctors and h.doctors > 0:
+                    doctor_score = 10.0
+
+            # Distance Score (Max 30 pts)
+            h_lat = h.lat if h.lat else ref_lat
+            h_lng = h.lng if h.lng else ref_lng
+            distance_km = haversine(ref_lat, ref_lng, h_lat, h_lng)
+            distance_score = round(max(0.0, 30.0 * (1.0 - (distance_km / 60.0))), 1)
+
+            # Diagnostic Test Match (Max 10 pts)
+            test_score = 0.0
+            tests_avail: List[str] = []
+            tests_miss: List[str] = []
+            if not tests:
+                test_score = 10.0
+            else:
+                h_test_names = [t.test_name.lower().strip() for t in h_tests] + [t.category.lower().strip() for t in h_tests]
+                for raw_t in tests:
+                    t_low = raw_t.lower().strip()
+                    if any(t_low in hn or hn in t_low for hn in h_test_names):
+                        tests_avail.append(raw_t)
+                    else:
+                        tests_miss.append(raw_t)
+                ratio = len(tests_avail) / len(tests)
+                test_score = round(ratio * 10.0, 1)
+
+            # Medicine Stock Score (Max 10 pts)
+            medicine_score = 0.0
+            med_stock_status_list: List[MedicineStockInfo] = []
+            if not meds:
+                medicine_score = 10.0
+            else:
+                pts_list = []
+                for raw_m in meds:
+                    m_low = raw_m.lower().strip()
+                    matching_p = [p for p in h_pharm if m_low in (p.medicine_name or "").lower() or m_low in (p.generic_name or "").lower()]
+                    matching_i = [inv for inv in h_inv if m_low in (inv.category or "").lower() or m_low in (inv.medicine_name or "").lower()]
+
+                    status = "OUT_OF_STOCK"
+                    sample_name = None
+                    pts = 0.0
+
+                    if matching_p:
+                        in_stock_p = [p for p in matching_p if p.status == "IN_STOCK"]
+                        if in_stock_p:
+                            status = "IN_STOCK"
+                            sample_name = in_stock_p[0].medicine_name
+                            pts = 1.0
+                        else:
+                            status = "LOW_STOCK"
+                            sample_name = matching_p[0].medicine_name
+                            pts = 0.5
+                    elif matching_i:
+                        in_stock_i = [i for i in matching_i if not i.is_low_stock and i.current_stock > i.min_threshold]
+                        if in_stock_i:
+                            status = "IN_STOCK"
+                            sample_name = in_stock_i[0].medicine_name
+                            pts = 1.0
+                        else:
+                            status = "LOW_STOCK"
+                            sample_name = matching_i[0].medicine_name
+                            pts = 0.5
+                    pts_list.append(pts)
+                    med_stock_status_list.append(
+                        MedicineStockInfo(
+                            category=raw_m,
+                            status=status,
+                            medicine_name=sample_name,
+                        )
+                    )
+                avg_pts = sum(pts_list) / len(pts_list) if pts_list else 1.0
+                medicine_score = round(avg_pts * 10.0, 1)
+
+            total_score = round(doctor_score + distance_score + test_score + medicine_score, 1)
+
+            is_emerg_cap = bool(
+                (h.emergency_services and h.emergency_services.strip().lower() not in ["no", "none", "0"]) or
+                (h.ambulance and h.ambulance.strip().lower() not in ["no", "none", "0"]) or
+                (h.care_type and "district" in h.care_type.lower())
+            )
+
+            scored_facilities.append(
+                HospitalMatchResult(
+                    hospital_id=h.id,
+                    hospital_name=h.name,
+                    category=h.category,
+                    care_type=h.care_type,
+                    address=h.address or f"{h.subdistrict or ''}, {h.district or ''}".strip(", "),
+                    district=h.district,
+                    phone=h.phone,
+                    distance_km=distance_km,
+                    score=total_score,
+                    score_breakdown=ScoreBreakdown(
+                        doctor_score=doctor_score,
+                        test_score=test_score,
+                        medicine_score=medicine_score,
+                        distance_score=distance_score,
+                    ),
+                    doctor=best_doc,
+                    tests_available=tests_avail,
+                    tests_missing=tests_miss,
+                    medicine_stock_status=med_stock_status_list,
+                    is_emergency_capable=is_emerg_cap,
+                )
+            )
+
+        scored_facilities.sort(key=lambda r: (r.score, -r.distance_km), reverse=True)
+        return scored_facilities[:limit]
+
 
 # Global singleton service instance
 symptom_matching_service = SymptomMatchingService()
+

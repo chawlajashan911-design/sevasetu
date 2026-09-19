@@ -27,7 +27,10 @@ import {
   AlertOctagon,
   Calendar,
   CheckCircle2,
-  Sparkles
+  Sparkles,
+  Building2,
+  Stethoscope,
+  Loader2
 } from 'lucide-react';
 
 export const AshaPortal = ({
@@ -184,6 +187,37 @@ export const AshaPortal = ({
       refreshRecords();
     } catch (err) {
       alert("Screening Error: " + (err.message || 'Error saving'));
+    }
+  };
+
+  // Referral Dispatch from ASHA Triage Modal
+  const [referringFacilityId, setReferringFacilityId] = useState(null);
+  const handleAshaReferral = async (facility) => {
+    if (!screeningResultModal) return;
+    setReferringFacilityId(facility.hospital_id);
+    try {
+      const payload = {
+        triage_id: screeningResultModal.id || null,
+        patient_name: screeningResultModal.patient_name || 'Citizen Patient',
+        age: 30,
+        priority: screeningResultModal.priority || 'P3',
+        source_facility: 'ASHA Field Worker Screening',
+        target_facility: facility.hospital_name,
+        urgency: screeningResultModal.priority === 'P1' ? 'Immediate' : screeningResultModal.priority === 'P2' ? 'Urgent' : 'Routine',
+        reason: screeningResultModal.triage_reason || (screeningResultModal.differential_diagnosis || []).join(', ') || 'ASHA referral',
+        transport_mode: screeningResultModal.priority === 'P1' ? '108 Emergency Ambulance' : 'Private / Public Transport',
+        status: 'Pending',
+      };
+      const res = await api.createReferral(payload);
+      alert(`Referral successfully dispatched to ${facility.hospital_name}! Tracking ID: #${res.id || 'NEW'}`);
+      refreshRecords();
+      try {
+        confetti({ particleCount: 60, spread: 70, origin: { y: 0.6 } });
+      } catch (e) {}
+    } catch (err) {
+      alert("Error creating referral: " + (err.message || 'Error'));
+    } finally {
+      setReferringFacilityId(null);
     }
   };
 
@@ -802,6 +836,67 @@ export const AshaPortal = ({
                 {screeningResultModal.recommended_action || (screeningResultModal.priority === 'P1' ? 'Alert 108 Emergency Ambulance immediately.' : 'Advise rest, hydration, and visit PHC OPD.')}
               </p>
             </div>
+
+            {/* Recommended Facilities */}
+            {screeningResultModal.recommended_facilities && screeningResultModal.recommended_facilities.length > 0 && (
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-1.5">
+                    <Building2 className="w-4 h-4 text-purple-700" />
+                    <span className="text-xs font-black uppercase text-slate-800">
+                      Recommended Referral Facilities
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full">
+                    Live Match
+                  </span>
+                </div>
+
+                <div className="space-y-2">
+                  {screeningResultModal.recommended_facilities.map((facility, idx) => (
+                    <div key={facility.hospital_id || idx} className="p-2.5 bg-white rounded-xl border border-slate-200 text-xs space-y-1.5">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="font-black text-slate-900">{facility.hospital_name}</p>
+                          <p className="text-[10px] text-slate-500 font-semibold">
+                            📍 {facility.distance_km} km away {facility.category ? `• ${facility.category}` : ''}
+                          </p>
+                        </div>
+                        <span className="text-[10px] font-black text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded-md border border-purple-200">
+                          {facility.score} pts
+                        </span>
+                      </div>
+
+                      {facility.doctor && (
+                        <div className="flex items-center space-x-1 text-[10px] text-emerald-800 font-medium bg-emerald-50 p-1.5 rounded-lg border border-emerald-200">
+                          <Stethoscope className="w-3 h-3 text-emerald-600 shrink-0" />
+                          <span><strong>{facility.doctor.name}</strong> ({facility.doctor.speciality}) • Slot: {facility.doctor.next_slot || 'Today'}</span>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => handleAshaReferral(facility)}
+                        disabled={referringFacilityId === facility.hospital_id}
+                        className="w-full py-1.5 bg-gradient-to-r from-purple-700 to-fuchsia-700 hover:from-purple-800 hover:to-fuchsia-800 text-white font-black text-[11px] rounded-lg flex items-center justify-center space-x-1 shadow-xs cursor-pointer disabled:opacity-50"
+                      >
+                        {referringFacilityId === facility.hospital_id ? (
+                          <>
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            <span>Dispatching...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-3 h-3" />
+                            <span>Refer Patient to {facility.hospital_name}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <button
               onClick={() => setScreeningResultModal(null)}

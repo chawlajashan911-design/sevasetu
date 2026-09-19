@@ -1,3 +1,4 @@
+from __future__ import annotations
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
@@ -65,6 +66,7 @@ class TriageEvaluationResponse(BaseModel):
     recommended_investigations: List[str] = []
     ai_model: Optional[str] = "Gemini 3.6 Flash + Clinical Rule Guardrail v2.0"
     cached: Optional[bool] = False
+    recommended_facilities: List[HospitalMatchResult] = []
 
 class DoctorVerificationRequest(BaseModel):
     triage_id: int

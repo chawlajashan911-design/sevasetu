@@ -521,6 +521,22 @@ def evaluate_triage(req: TriageEvaluationRequest, db: Session = Depends(get_db))
     db.commit()
     db.refresh(record)
 
+    # 4. Live Facility Recommendations (Additive Step: reuses differential output + live DB, no extra Gemini call)
+    try:
+        recommended_facilities = symptom_matching_service.rank_triage_hospitals_live(
+            db=db,
+            differential_diagnosis=triage_result.get("differential_diagnosis") or [],
+            priority=triage_result["priority"],
+            symptoms=req.vitals.symptoms,
+            patient_lat=req.lat,
+            patient_lng=req.lng,
+            patient_district=req.district,
+            limit=3
+        )
+    except Exception as e:
+        logger.warning(f"Error fetching triage facility recommendations: {e}")
+        recommended_facilities = []
+
     output = {
         "id": record.id,
         "priority": triage_result["priority"],
@@ -538,6 +554,7 @@ def evaluate_triage(req: TriageEvaluationRequest, db: Session = Depends(get_db))
         "recommended_investigations": triage_result.get("recommended_investigations") or [],
         "ai_model": triage_result.get("model_engine") or "Gemini 3.6 Flash + Clinical Rule Guardrail v2.0",
         "cached": False,
+        "recommended_facilities": recommended_facilities,
     }
 
     _TRIAGE_DEDUPLICATION_CACHE[fingerprint] = {
