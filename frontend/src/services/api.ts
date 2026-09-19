@@ -801,6 +801,32 @@ export const api = {
       throw new Error(err.detail || 'Failed to delete pharmacy item');
     }
     return await res.json();
+  },
+
+  // ----------------- AI Symptom → Hospital Matching -----------------
+
+  async matchSymptomToHospitals(payload) {
+    const res = await fetch(`${API_BASE}/symptom-match`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Symptom matching failed');
+    }
+    return await res.json();
+  },
+
+  async getSymptomMatchEnums() {
+    try {
+      const res = await fetch(`${API_BASE}/symptom-match/enums`);
+      if (!res.ok) throw new Error('Failed to fetch enums');
+      return await res.json();
+    } catch (e) {
+      console.warn('Symptom match enums fetch error:', e);
+      return { specialities: [], suggested_tests: [], medicine_categories: [] };
+    }
   }
 };
 

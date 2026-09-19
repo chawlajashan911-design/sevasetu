@@ -38,7 +38,14 @@ import {
   Plus,
   Minus,
   FlaskConical,
-  X
+  X,
+  Zap,
+  Loader2,
+  ChevronDown,
+  ChevronUp,
+  Star,
+  TestTube2,
+  Siren
 } from 'lucide-react';
 
 export const PatientPortal = ({
@@ -54,6 +61,19 @@ export const PatientPortal = ({
   // Active section tab
   const [activeTab, setActiveTab] = useState('triage');
   const { isDemoMode } = useDemoMode();
+
+  // AI Symptom Matcher State
+  const [aiSymptoms, setAiSymptoms] = useState('');
+  const [aiAge, setAiAge] = useState('');
+  const [aiSex, setAiSex] = useState('Male');
+  const [aiDuration, setAiDuration] = useState('1 day');
+  const [aiDistrict, setAiDistrict] = useState('');
+  const [aiManualSpec, setAiManualSpec] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState(null);
+  const [aiError, setAiError] = useState('');
+  const [aiEnums, setAiEnums] = useState({ specialities: [], suggested_tests: [], medicine_categories: [] });
+  const [aiExpandedHosp, setAiExpandedHosp] = useState(null);
 
   // Load patient profile & village from localStorage if present
   const getInitialPatientData = () => {
@@ -272,6 +292,15 @@ export const PatientPortal = ({
       setSymptoms(prev => (prev ? `${prev} ${transcript}` : transcript));
     }
   }, [transcript]);
+
+  // Load AI Matcher enums when tab is selected
+  useEffect(() => {
+    if (activeTab === 'ai_matcher' && aiEnums.specialities.length === 0) {
+      api.getSymptomMatchEnums().then(data => {
+        if (data && data.specialities) setAiEnums(data);
+      }).catch(() => {});
+    }
+  }, [activeTab]);
 
   // Quick symptom chips
   const symptomChips = language === 'mr' ? [
@@ -494,12 +523,13 @@ export const PatientPortal = ({
 
   const navTabs = [
     { id: 'triage', label: language === 'mr' ? '१. लक्षणे व AI तपासणी' : language === 'hi' ? '1. लक्षण व AI जांच' : '1. Enter Symptoms & Triage', icon: <Activity className="w-4 h-4" /> },
-    { id: 'facilities', label: language === 'mr' ? '२. शासकीय व नोंदणीकृत रुग्णालये' : language === 'hi' ? '2. सरकारी एवं पंजीकृत अस्पताल' : '2. Healthcare Facilities', icon: <Building2 className="w-4 h-4" /> },
-    { id: 'book_appointment', label: language === 'mr' ? '३. अपॉइंटमेंट बुक करा' : language === 'hi' ? '3. अपॉइंटमेंट बुकिंग' : '3. Book Appointment', icon: <Calendar className="w-4 h-4" /> },
-    { id: 'records', label: language === 'mr' ? '४. डिजिटल आरोग्य नोंदी' : language === 'hi' ? '4. स्वास्थ्य रिकॉर्ड' : '4. Health Records & ABHA', icon: <FileText className="w-4 h-4" /> },
-    { id: 'referrals', label: language === 'mr' ? '५. रेफरल ट्रॅकिंग' : language === 'hi' ? '5. रेफरल ट्रैकिंग' : '5. Referral Tracking', icon: <Send className="w-4 h-4" />, badge: referrals.length },
-    { id: 'followup', label: language === 'mr' ? '६. फॉलो-अप' : language === 'hi' ? '6. फॉलो-अप' : '6. Follow-up & Care', icon: <HeartHandshake className="w-4 h-4" /> },
-    { id: 'profile', label: language === 'mr' ? '७. प्रोफाइल' : language === 'hi' ? '7. प्रोफाइल' : '7. Profile & Village', icon: <User className="w-4 h-4" /> }
+    { id: 'ai_matcher', label: language === 'mr' ? '२. AI रुग्णालय शोधा' : language === 'hi' ? '2. AI अस्पताल खोजें' : '2. AI Hospital Matcher', icon: <Zap className="w-4 h-4" /> },
+    { id: 'facilities', label: language === 'mr' ? '३. शासकीय व नोंदणीकृत रुग्णालये' : language === 'hi' ? '3. सरकारी एवं पंजीकृत अस्पताल' : '3. Healthcare Facilities', icon: <Building2 className="w-4 h-4" /> },
+    { id: 'book_appointment', label: language === 'mr' ? '४. अपॉइंटमेंट बुक करा' : language === 'hi' ? '4. अपॉइंटमेंट बुकिंग' : '4. Book Appointment', icon: <Calendar className="w-4 h-4" /> },
+    { id: 'records', label: language === 'mr' ? '५. डिजिटल आरोग्य नोंदी' : language === 'hi' ? '5. स्वास्थ्य रिकॉर्ड' : '5. Health Records & ABHA', icon: <FileText className="w-4 h-4" /> },
+    { id: 'referrals', label: language === 'mr' ? '६. रेफरल ट्रॅकिंग' : language === 'hi' ? '6. रेफरल ट्रैकिंग' : '6. Referral Tracking', icon: <Send className="w-4 h-4" />, badge: referrals.length },
+    { id: 'followup', label: language === 'mr' ? '७. फॉलो-अप' : language === 'hi' ? '7. फॉलो-अप' : '7. Follow-up & Care', icon: <HeartHandshake className="w-4 h-4" /> },
+    { id: 'profile', label: language === 'mr' ? '८. प्रोफाइल' : language === 'hi' ? '8. प्रोफाइल' : '8. Profile & Village', icon: <User className="w-4 h-4" /> }
   ];
 
   return (
@@ -1168,6 +1198,374 @@ export const PatientPortal = ({
       )}
 
       {/* ---------------- 2. GOVERNMENT HOSPITAL DIRECTORY (CSV DATASET) ---------------- */}
+      {/* ---------------- 2. AI SYMPTOM → HOSPITAL MATCHER ---------------- */}
+      {activeTab === 'ai_matcher' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Input Form */}
+          <div className="lg:col-span-1 space-y-4">
+            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-5">
+              <div className="flex items-center space-x-3 border-b border-slate-100 pb-4">
+                <div className="w-10 h-10 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">AI Hospital Matcher</h3>
+                  <p className="text-[11px] text-slate-500 font-medium">Describe your symptoms to find the best hospital</p>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 mb-1.5 block">Symptoms *</label>
+                <textarea
+                  id="ai-symptoms-input"
+                  value={aiSymptoms}
+                  onChange={e => setAiSymptoms(e.target.value)}
+                  placeholder="e.g. Chest pain with breathlessness for 2 days, sweating..."
+                  className="w-full px-4 py-3 rounded-2xl border border-slate-200 text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-violet-400 outline-none resize-none"
+                  rows={3}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 mb-1 block">Age</label>
+                  <input
+                    id="ai-age-input"
+                    type="number"
+                    value={aiAge}
+                    onChange={e => setAiAge(e.target.value)}
+                    placeholder="30"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-violet-400 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 mb-1 block">Sex</label>
+                  <select
+                    id="ai-sex-input"
+                    value={aiSex}
+                    onChange={e => setAiSex(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-violet-400 outline-none cursor-pointer"
+                  >
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 mb-1 block">Duration</label>
+                  <input
+                    id="ai-duration-input"
+                    value={aiDuration}
+                    onChange={e => setAiDuration(e.target.value)}
+                    placeholder="1 day"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-violet-400 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 mb-1 block">District</label>
+                  <input
+                    id="ai-district-input"
+                    value={aiDistrict}
+                    onChange={e => setAiDistrict(e.target.value)}
+                    placeholder="Pune"
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-violet-400 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 mb-1 block">Manual Specialty Override (optional)</label>
+                <select
+                  id="ai-manual-spec-input"
+                  value={aiManualSpec}
+                  onChange={e => setAiManualSpec(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm bg-slate-50 focus:bg-white focus:ring-2 focus:ring-violet-400 outline-none cursor-pointer"
+                >
+                  <option value="">Let AI decide</option>
+                  {aiEnums.specialities.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+
+              <button
+                id="ai-match-submit"
+                disabled={!aiSymptoms.trim() || aiLoading}
+                onClick={async () => {
+                  setAiLoading(true);
+                  setAiError('');
+                  setAiResult(null);
+                  try {
+                    const payload = {
+                      symptoms: aiSymptoms,
+                      age: parseInt(aiAge) || 30,
+                      sex: aiSex,
+                      duration: aiDuration || '1 day',
+                      district: aiDistrict || registeredPatient?.district || undefined,
+                      lat: gpsLocation?.lat || undefined,
+                      lng: gpsLocation?.lng || undefined,
+                      manual_speciality: aiManualSpec || undefined
+                    };
+                    const result = await api.matchSymptomToHospitals(payload);
+                    setAiResult(result);
+                  } catch (err) {
+                    setAiError(err.message || 'Failed to match symptoms');
+                  } finally {
+                    setAiLoading(false);
+                  }
+                }}
+                className={`w-full py-3.5 rounded-2xl text-sm font-black transition-all flex items-center justify-center space-x-2 cursor-pointer ${
+                  !aiSymptoms.trim() || aiLoading
+                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    : 'bg-violet-600 hover:bg-violet-700 text-white shadow-lg shadow-violet-600/20'
+                }`}
+              >
+                {aiLoading ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /><span>Analyzing...</span></>
+                ) : (
+                  <><Zap className="w-4 h-4" /><span>Find Best Hospital</span></>
+                )}
+              </button>
+
+              {aiError && (
+                <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs font-medium">
+                  <AlertTriangle className="w-3.5 h-3.5 inline mr-1.5" />{aiError}
+                </div>
+              )}
+
+              {/* Disclaimer */}
+              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-medium leading-relaxed">
+                <ShieldCheck className="w-3.5 h-3.5 inline mr-1" />
+                This is an AI-assisted navigational tool. It is <strong>not a substitute for clinical diagnosis</strong> or treatment by a qualified medical professional.
+              </div>
+            </div>
+          </div>
+
+          {/* Results Panel */}
+          <div className="lg:col-span-2 space-y-4">
+            {!aiResult && !aiLoading && (
+              <div className="bg-white rounded-3xl p-12 shadow-sm border border-slate-200 text-center">
+                <div className="w-16 h-16 rounded-3xl bg-violet-100 text-violet-500 flex items-center justify-center mx-auto mb-4">
+                  <Stethoscope className="w-8 h-8" />
+                </div>
+                <h3 className="text-lg font-black text-slate-800 mb-1">AI-Powered Hospital Matching</h3>
+                <p className="text-sm text-slate-500 max-w-md mx-auto">Enter your symptoms on the left to get personalized hospital recommendations based on doctor availability, diagnostic tests, medicine stock, and proximity.</p>
+              </div>
+            )}
+
+            {aiLoading && (
+              <div className="bg-white rounded-3xl p-12 shadow-sm border border-slate-200 text-center">
+                <Loader2 className="w-10 h-10 text-violet-500 animate-spin mx-auto mb-4" />
+                <h3 className="text-base font-black text-slate-800 mb-1">Analyzing Symptoms...</h3>
+                <p className="text-xs text-slate-500">AI is reasoning through your symptoms and ranking hospitals from live data.</p>
+              </div>
+            )}
+
+            {aiResult && (
+              <div className="space-y-4">
+                {/* Emergency Override Banner */}
+                {aiResult.emergency_override && (
+                  <div className="bg-red-600 text-white rounded-2xl p-5 shadow-lg border-2 border-red-400 animate-pulse">
+                    <div className="flex items-start space-x-3">
+                      <Siren className="w-6 h-6 shrink-0 mt-0.5" />
+                      <div>
+                        <h3 className="text-base font-black">EMERGENCY ALERT</h3>
+                        <p className="text-sm mt-1 opacity-95">{aiResult.emergency_override.alert_message}</p>
+                        {aiResult.emergency_override.nearest_facility && (
+                          <div className="mt-3 bg-white/15 backdrop-blur-sm rounded-xl p-3">
+                            <p className="text-xs font-bold">Nearest Emergency Facility:</p>
+                            <p className="text-sm font-black mt-0.5">{aiResult.emergency_override.nearest_facility.hospital_name}</p>
+                            <p className="text-xs opacity-90 mt-0.5">{aiResult.emergency_override.nearest_facility.address}</p>
+                            <div className="flex items-center space-x-3 mt-2 text-xs">
+                              <span><Phone className="w-3 h-3 inline mr-1" />{aiResult.emergency_override.nearest_facility.phone || '108'}</span>
+                              <span><MapPin className="w-3 h-3 inline mr-1" />{aiResult.emergency_override.nearest_facility.distance_km} km</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* AI Assessment Summary */}
+                <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-200">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-3">
+                    <div className="flex items-center space-x-2">
+                      <Sparkles className="w-4 h-4 text-violet-600" />
+                      <h3 className="text-sm font-black text-slate-900">AI Assessment</h3>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className={`text-[10px] font-black px-2.5 py-1 rounded-xl ${
+                        aiResult.assessment.urgency === 'EMERGENCY' ? 'bg-red-100 text-red-800 border border-red-300' :
+                        aiResult.assessment.urgency === 'URGENT' ? 'bg-amber-100 text-amber-800 border border-amber-300' :
+                        'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                      }`}>{aiResult.assessment.urgency}</span>
+                      {aiResult.assessment.cached && <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-lg">Cached</span>}
+                      {aiResult.assessment.fallback_used && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-lg">Rule-Based</span>}
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-700 leading-relaxed mb-3">{aiResult.assessment.summary}</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-slate-50 rounded-xl p-2.5">
+                      <p className="text-[10px] font-bold text-slate-500 mb-1">Specialities</p>
+                      {aiResult.assessment.specialities.map((s, i) => (
+                        <span key={i} className="inline-block text-[11px] font-bold text-violet-800 bg-violet-100 px-2 py-0.5 rounded-lg mr-1 mb-1">{s.name} ({Math.round(s.confidence * 100)}%)</span>
+                      ))}
+                    </div>
+                    <div className="bg-slate-50 rounded-xl p-2.5">
+                      <p className="text-[10px] font-bold text-slate-500 mb-1">Suggested Tests</p>
+                      {aiResult.assessment.suggested_tests.map((t, i) => (
+                        <span key={i} className="inline-block text-[11px] font-bold text-teal-800 bg-teal-100 px-2 py-0.5 rounded-lg mr-1 mb-1">{t}</span>
+                      ))}
+                    </div>
+                    <div className="bg-slate-50 rounded-xl p-2.5">
+                      <p className="text-[10px] font-bold text-slate-500 mb-1">Medicine Categories</p>
+                      {aiResult.assessment.medicine_categories.map((m, i) => (
+                        <span key={i} className="inline-block text-[11px] font-bold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-lg mr-1 mb-1">{m}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Ranked Hospitals */}
+                <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-200">
+                  <h3 className="text-sm font-black text-slate-900 mb-3 flex items-center space-x-2">
+                    <Building2 className="w-4 h-4 text-teal-600" />
+                    <span>Top {aiResult.ranked_hospitals.length} Matched Hospitals (Live Ranking)</span>
+                  </h3>
+                  <div className="space-y-3">
+                    {aiResult.ranked_hospitals.map((hosp, idx) => {
+                      const isExpanded = aiExpandedHosp === hosp.hospital_id;
+                      return (
+                        <div key={hosp.hospital_id} className={`rounded-2xl border transition-all ${
+                          idx === 0 && aiResult.emergency_override ? 'border-red-300 bg-red-50/30' :
+                          idx === 0 ? 'border-violet-300 bg-violet-50/30' : 'border-slate-200 bg-slate-50/30'
+                        }`}>
+                          <div
+                            className="p-4 cursor-pointer"
+                            onClick={() => setAiExpandedHosp(isExpanded ? null : hosp.hospital_id)}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-3">
+                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-sm ${
+                                  idx === 0 ? 'bg-violet-600 text-white' : 'bg-slate-200 text-slate-600'
+                                }`}>#{idx + 1}</div>
+                                <div>
+                                  <h4 className="text-sm font-black text-slate-900">{hosp.hospital_name}</h4>
+                                  <div className="flex items-center space-x-2 text-[11px] text-slate-500 mt-0.5">
+                                    {hosp.category && <span>{hosp.category}</span>}
+                                    {hosp.district && <><span>·</span><span>{hosp.district}</span></>}
+                                    <span>·</span><span><MapPin className="w-3 h-3 inline" /> {hosp.distance_km} km</span>
+                                    {hosp.is_emergency_capable && <span className="text-red-600 font-bold"><Siren className="w-3 h-3 inline" /> Emergency</span>}
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center space-x-3">
+                                <div className="text-right">
+                                  <p className="text-lg font-black text-violet-700">{hosp.score.toFixed(1)}</p>
+                                  <p className="text-[10px] text-slate-400 font-bold">/ 100 pts</p>
+                                </div>
+                                {isExpanded ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                              </div>
+                            </div>
+
+                            {/* Score Bars */}
+                            <div className="grid grid-cols-4 gap-2 mt-3">
+                              {[
+                                { label: 'Doctor', score: hosp.score_breakdown.doctor_score, max: 40, color: 'bg-violet-500' },
+                                { label: 'Tests', score: hosp.score_breakdown.test_score, max: 25, color: 'bg-teal-500' },
+                                { label: 'Medicines', score: hosp.score_breakdown.medicine_score, max: 20, color: 'bg-blue-500' },
+                                { label: 'Distance', score: hosp.score_breakdown.distance_score, max: 15, color: 'bg-amber-500' }
+                              ].map(bar => (
+                                <div key={bar.label}>
+                                  <div className="flex items-center justify-between text-[10px] mb-0.5">
+                                    <span className="text-slate-500 font-bold">{bar.label}</span>
+                                    <span className="text-slate-700 font-black">{bar.score}/{bar.max}</span>
+                                  </div>
+                                  <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                                    <div className={`h-full rounded-full ${bar.color}`} style={{ width: `${(bar.score / bar.max) * 100}%` }} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Expanded Details */}
+                          {isExpanded && (
+                            <div className="px-4 pb-4 space-y-3 border-t border-slate-100 pt-3">
+                              {/* Doctor */}
+                              {hosp.doctor && (
+                                <div className="flex items-start space-x-3 p-3 bg-white rounded-xl border border-slate-200">
+                                  <Stethoscope className="w-4 h-4 text-violet-600 mt-0.5 shrink-0" />
+                                  <div>
+                                    <p className="text-xs font-black text-slate-900">{hosp.doctor.name}</p>
+                                    <p className="text-[11px] text-slate-600">{hosp.doctor.speciality}{hosp.doctor.qualification ? ` · ${hosp.doctor.qualification}` : ''}</p>
+                                    {hosp.doctor.next_slot && <p className="text-[11px] text-teal-700 font-bold mt-0.5"><Clock className="w-3 h-3 inline mr-1" />Next: {hosp.doctor.next_slot}</p>}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Tests */}
+                              <div className="p-3 bg-white rounded-xl border border-slate-200">
+                                <p className="text-[11px] font-bold text-slate-600 mb-1.5 flex items-center"><TestTube2 className="w-3.5 h-3.5 mr-1 text-teal-600" />Diagnostic Tests</p>
+                                <div className="flex flex-wrap gap-1">
+                                  {hosp.tests_available.map((t, i) => (
+                                    <span key={i} className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-lg"><CheckCircle className="w-2.5 h-2.5 inline mr-0.5" />{t}</span>
+                                  ))}
+                                  {hosp.tests_missing.map((t, i) => (
+                                    <span key={i} className="text-[10px] font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded-lg"><X className="w-2.5 h-2.5 inline mr-0.5" />{t}</span>
+                                  ))}
+                                  {hosp.tests_available.length === 0 && hosp.tests_missing.length === 0 && (
+                                    <span className="text-[10px] text-slate-400">No test data registered</span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Medicine Stock */}
+                              {hosp.medicine_stock_status.length > 0 && (
+                                <div className="p-3 bg-white rounded-xl border border-slate-200">
+                                  <p className="text-[11px] font-bold text-slate-600 mb-1.5 flex items-center"><Pill className="w-3.5 h-3.5 mr-1 text-blue-600" />Medicine Stock</p>
+                                  <div className="flex flex-wrap gap-1">
+                                    {hosp.medicine_stock_status.map((m, i) => (
+                                      <span key={i} className={`text-[10px] font-bold px-2 py-0.5 rounded-lg ${
+                                        m.status === 'IN_STOCK' ? 'text-emerald-800 bg-emerald-100' :
+                                        m.status === 'LOW_STOCK' ? 'text-amber-800 bg-amber-100' :
+                                        'text-red-700 bg-red-100'
+                                      }`}>{m.category}: {m.status.replace('_', ' ')}</span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Contact */}
+                              <div className="flex items-center space-x-4 text-xs text-slate-600">
+                                {hosp.phone && <span className="flex items-center space-x-1"><Phone className="w-3 h-3" /><span>{hosp.phone}</span></span>}
+                                {hosp.address && <span className="flex items-center space-x-1"><MapPin className="w-3 h-3" /><span>{hosp.address}</span></span>}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {aiResult.ranked_hospitals.length === 0 && (
+                      <div className="p-6 text-center text-slate-500 text-xs bg-slate-50 rounded-2xl">
+                        No hospitals found matching the assessed specialities in your area.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Disclaimer Footer */}
+                <div className="p-3 rounded-xl bg-slate-100 text-slate-600 text-[11px] font-medium text-center">
+                  {aiResult.disclaimer}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {activeTab === 'facilities' && (
         <div className="space-y-6">
           <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-200 space-y-6">

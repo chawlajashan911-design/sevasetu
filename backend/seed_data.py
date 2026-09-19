@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .models import (
     Patient, TriageRecord, Inventory, Referral, Appointment,
     OutbreakCluster, AshaIncentive, OtpSession,
-    HospitalDoctor, HospitalTest, HospitalPharmacyItem
+    Hospital, HospitalDoctor, HospitalTest, HospitalPharmacyItem
 )
 
 FACILITIES = []
@@ -65,6 +65,65 @@ def seed_demo_data(db: Session):
     """Create a coherent reviewer dataset shared by every portal."""
     reset_dynamic_data(db)
     now = datetime.utcnow()
+
+    # Seed demo hospitals if hospitals table is empty (e.g. test SQLite in-memory)
+    if db.query(Hospital).count() == 0:
+        db.add_all([
+            Hospital(
+                id="hospital_aundh",
+                name="Aundh District Hospital",
+                category="District Hospital",
+                care_type="Tertiary Care",
+                district="Pune",
+                subdistrict="Haveli",
+                village="Aundh",
+                lat=18.5601,
+                lng=73.8031,
+                emergency_services="24x7 Emergency & Trauma Unit",
+                ambulance="108 Service Available",
+                doctors=45,
+                beds=300,
+                status="Open",
+                phone="020-25881234",
+                address="Aundh Camp, Pune, Maharashtra 411027"
+            ),
+            Hospital(
+                id="hosp-1",
+                name="Pune Civil & District Hospital",
+                category="Civil Hospital",
+                care_type="Secondary Care",
+                district="Pune",
+                subdistrict="Pune City",
+                lat=18.5204,
+                lng=73.8567,
+                emergency_services="24x7 Casualty & Emergency",
+                ambulance="108 Available",
+                doctors=60,
+                beds=500,
+                status="Open",
+                phone="020-26123456",
+                address="Station Road, Pune, Maharashtra 411001"
+            ),
+            Hospital(
+                id="hosp-khed",
+                name="Khed Sub-District Hospital",
+                category="Sub-District Hospital",
+                care_type="Secondary Care",
+                district="Pune",
+                subdistrict="Khed",
+                lat=18.8465,
+                lng=73.9056,
+                emergency_services="Emergency OPD",
+                ambulance="108 Available",
+                doctors=15,
+                beds=100,
+                status="Open",
+                phone="02135-222333",
+                address="Rajgurunagar, Khed, Pune 410505"
+            )
+        ])
+        db.flush()
+
     patients = [
         Patient(name="Sunita Patil", age=28, gender="Female", phone="9822104512", abha_id="14-8832-9012-4412", village="Kharpudi", taluka="Khed", district="Pune"),
         Patient(name="Ananda Shinde", age=54, gender="Male", phone="9822334455", abha_id="14-2391-8842-1055", village="Shirasgaon", taluka="Khed", district="Pune"),

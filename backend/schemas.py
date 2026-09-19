@@ -287,3 +287,102 @@ class HospitalPharmacyItemResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+# ─────────────────────────────────────────────
+# Symptom to Hospital Matching Schemas
+# ─────────────────────────────────────────────
+
+class SpecialityConfidence(BaseModel):
+    name: str
+    confidence: float = 0.9
+
+
+class SymptomAssessment(BaseModel):
+    urgency: str = "ROUTINE"  # EMERGENCY, URGENT, ROUTINE
+    specialities: List[SpecialityConfidence] = []
+    suggested_tests: List[str] = []
+    medicine_categories: List[str] = []
+    summary: str = ""
+    cached: bool = False
+    fallback_used: bool = False
+
+
+class DoctorMatchInfo(BaseModel):
+    id: Optional[int] = None
+    name: str
+    speciality: str
+    next_slot: Optional[str] = None
+    qualification: Optional[str] = None
+    experience_years: Optional[int] = 0
+
+
+class MedicineStockInfo(BaseModel):
+    category: str
+    status: str  # "IN_STOCK", "LOW_STOCK", "OUT_OF_STOCK"
+    medicine_name: Optional[str] = None
+
+
+class ScoreBreakdown(BaseModel):
+    doctor_score: float = 0.0
+    test_score: float = 0.0
+    medicine_score: float = 0.0
+    distance_score: float = 0.0
+
+
+class HospitalMatchResult(BaseModel):
+    hospital_id: str
+    hospital_name: str
+    category: Optional[str] = None
+    care_type: Optional[str] = None
+    address: Optional[str] = None
+    district: Optional[str] = None
+    phone: Optional[str] = None
+    distance_km: float
+    score: float
+    score_breakdown: ScoreBreakdown
+    doctor: Optional[DoctorMatchInfo] = None
+    tests_available: List[str] = []
+    tests_missing: List[str] = []
+    medicine_stock_status: List[MedicineStockInfo] = []
+    is_emergency_capable: bool = False
+
+
+class EmergencyFacilityInfo(BaseModel):
+    hospital_id: str
+    hospital_name: str
+    category: Optional[str] = None
+    address: Optional[str] = None
+    district: Optional[str] = None
+    phone: Optional[str] = None
+    distance_km: float
+    emergency_services: Optional[str] = None
+    ambulance: Optional[str] = None
+
+
+class EmergencyOverride(BaseModel):
+    is_emergency: bool = True
+    alert_message: str
+    nearest_facility: Optional[EmergencyFacilityInfo] = None
+
+
+class SymptomMatchRequest(BaseModel):
+    symptoms: str
+    age: int = 30
+    sex: str = "Male"
+    duration: Optional[str] = "1 day"
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    district: Optional[str] = None
+    manual_speciality: Optional[str] = None
+
+
+class SymptomMatchResponse(BaseModel):
+    assessment: SymptomAssessment
+    emergency_override: Optional[EmergencyOverride] = None
+    ranked_hospitals: List[HospitalMatchResult] = []
+    disclaimer: str = (
+        "AI symptom assessment and hospital matching is for navigational and informational guidance only "
+        "and is not a substitute for clinical diagnosis or treatment by a qualified medical professional."
+    )
+
+

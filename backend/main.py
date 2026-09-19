@@ -34,7 +34,8 @@ from .schemas import (
     BhashiniTranslateRequest, AbhaFieldTaskCreate,
     HospitalDoctorCreate, HospitalDoctorUpdate,
     HospitalTestCreate, HospitalTestUpdate,
-    HospitalPharmacyItemCreate, HospitalPharmacyItemUpdate
+    HospitalPharmacyItemCreate, HospitalPharmacyItemUpdate,
+    SymptomMatchRequest, SymptomMatchResponse
 )
 from .triage_engine import triage_engine
 from .mock_services import AbdmFhirService
@@ -42,6 +43,7 @@ from .services.abdm_service import AbdmService
 from .services.bhashini_service import BhashiniService
 from .services.esanjeevani_service import ESanjeevaniService
 from .services.hospital_service import HospitalService
+from .services.symptom_matching_service import symptom_matching_service
 from .seed_data import seed_database, reset_dynamic_data, seed_demo_data, FACILITIES
 from .hospital_loader import hospital_directory
 
@@ -1314,6 +1316,44 @@ def delete_hospital_pharmacy_item(
     )
 
 
+# ─────────────────────────────────────────────
+# AI Symptom → Best Hospital Match Endpoints
+# ─────────────────────────────────────────────
+
+@app.post("/api/symptom-match", response_model=SymptomMatchResponse)
+def match_symptoms_to_hospitals_endpoint(
+    req: SymptomMatchRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    AI Symptom to Best Hospital Matcher.
+    1. Gemini reasoning (cached by symptom hash) parses urgency, specialties, tests, and medicine categories.
+    2. Live DB ranking calculates doctor slots, test availability, medicine stock, and proximity scores.
+    """
+    if not req.symptoms or not req.symptoms.strip():
+        raise HTTPException(status_code=400, detail="Symptoms text cannot be empty")
+
+    try:
+        return symptom_matching_service.match_symptoms_to_hospitals(
+            db=db,
+            request=req,
+        )
+    except Exception as e:
+        logger.error(f"Error in symptom matching endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Symptom matching failed: {str(e)}")
+
+
+@app.get("/api/symptom-match/enums")
+def get_symptom_match_enums_endpoint(db: Session = Depends(get_db)):
+    """
+    Returns available master specialities, tests, and medicine categories for manual override/filter.
+    """
+    specs, tests, meds = symptom_matching_service.get_constrained_enums(db)
+    return {
+        "specialities": specs,
+        "suggested_tests": tests,
+        "medicine_categories": meds,
+    }
 
 
 # ----------------- Static Files & Single Page Application (SPA) Serving -----------------
