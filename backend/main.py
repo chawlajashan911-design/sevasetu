@@ -21,7 +21,8 @@ from .database import engine, Base, get_db
 from .models import (
     Patient, TriageRecord, Referral, Appointment,
     Inventory, OutbreakCluster, AshaIncentive, Village,
-    TeleconsultRoom, AbhaFieldTask
+    TeleconsultRoom, AbhaFieldTask,
+    HospitalDoctor, HospitalTest, HospitalPharmacyItem
 )
 from .schemas import (
     PatientCreate, PatientResponse,
@@ -30,13 +31,17 @@ from .schemas import (
     AppointmentCreate, AppointmentResponse, AppointmentStatusUpdate,
     BatchSyncRequest, InventoryUpdate, VitalsInput,
     OtpRequest, OtpVerifyRequest, TeleconsultCreateRequest,
-    BhashiniTranslateRequest, AbhaFieldTaskCreate
+    BhashiniTranslateRequest, AbhaFieldTaskCreate,
+    HospitalDoctorCreate, HospitalDoctorUpdate,
+    HospitalTestCreate, HospitalTestUpdate,
+    HospitalPharmacyItemCreate, HospitalPharmacyItemUpdate
 )
 from .triage_engine import triage_engine
 from .mock_services import AbdmFhirService
 from .services.abdm_service import AbdmService
 from .services.bhashini_service import BhashiniService
 from .services.esanjeevani_service import ESanjeevaniService
+from .services.hospital_service import HospitalService
 from .seed_data import seed_database, reset_dynamic_data, seed_demo_data, FACILITIES
 from .hospital_loader import hospital_directory
 
@@ -1050,6 +1055,264 @@ def resolve_abha_field_task(task_id: int, db: Session = Depends(get_db)):
     task.status = "Completed"
     db.commit()
     return {"success": True, "task_id": task_id, "status": "Completed"}
+
+
+# ─────────────────────────────────────────────
+# Phase 1: Hospital Dashboard Endpoints
+# ─────────────────────────────────────────────
+
+# --- Hospital Doctors ---
+
+@app.get("/api/hospitals/{hospital_id}/doctors")
+def list_hospital_doctors(
+    hospital_id: str,
+    speciality: Optional[str] = Query(None, description="Filter by doctor speciality"),
+    active_only: bool = Query(False, description="Filter only active doctors"),
+    search: Optional[str] = Query(None, description="Search by doctor name or qualification"),
+    db: Session = Depends(get_db)
+):
+    """
+    Public & Patient view: List doctors available at a specific hospital.
+    Supports speciality filtering and keyword search.
+    """
+    return HospitalService.list_doctors(
+        db=db,
+        hospital_id=hospital_id,
+        speciality=speciality,
+        active_only=active_only,
+        search_query=search
+    )
+
+
+@app.get("/api/doctors/{doctor_id}")
+def get_doctor_detail(doctor_id: int, db: Session = Depends(get_db)):
+    doc = HospitalService.get_doctor(db, doctor_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    return doc
+
+
+@app.post("/api/hospitals/{hospital_id}/doctors", status_code=201)
+def create_hospital_doctor(
+    hospital_id: str,
+    payload: HospitalDoctorCreate,
+    x_hospital_id: Optional[str] = Header(None, alias="X-Hospital-Id"),
+    db: Session = Depends(get_db)
+):
+    """
+    Hospital-scoped: Create a new doctor under this hospital's account.
+    Validates ownership via header or path alignment.
+    """
+    req_hosp = (x_hospital_id or hospital_id).strip()
+    if payload.hospital_id and payload.hospital_id.strip().lower() != req_hosp.lower():
+        raise HTTPException(status_code=403, detail="Payload hospital_id does not match target hospital")
+    payload.hospital_id = req_hosp
+    return HospitalService.create_doctor(db, payload)
+
+
+@app.patch("/api/doctors/{doctor_id}")
+@app.put("/api/doctors/{doctor_id}")
+def update_hospital_doctor(
+    doctor_id: int,
+    payload: HospitalDoctorUpdate,
+    x_hospital_id: Optional[str] = Header(None, alias="X-Hospital-Id"),
+    db: Session = Depends(get_db)
+):
+    """
+    Hospital-scoped: Update doctor details, availability slots, or active status.
+    """
+    return HospitalService.update_doctor(
+        db=db,
+        doctor_id=doctor_id,
+        doc_in=payload,
+        requesting_hospital_id=x_hospital_id
+    )
+
+
+@app.delete("/api/doctors/{doctor_id}")
+def delete_hospital_doctor(
+    doctor_id: int,
+    x_hospital_id: Optional[str] = Header(None, alias="X-Hospital-Id"),
+    db: Session = Depends(get_db)
+):
+    """
+    Hospital-scoped: Delete doctor record.
+    """
+    return HospitalService.delete_doctor(
+        db=db,
+        doctor_id=doctor_id,
+        requesting_hospital_id=x_hospital_id
+    )
+
+
+# --- Hospital Diagnostic / Lab Tests ---
+
+@app.get("/api/hospitals/{hospital_id}/tests")
+def list_hospital_tests(
+    hospital_id: str,
+    category: Optional[str] = Query(None, description="Filter by test category (Pathology, Radiology, etc.)"),
+    available_only: bool = Query(False, description="Filter only currently available tests"),
+    search: Optional[str] = Query(None, description="Search by test name or prep notes"),
+    db: Session = Depends(get_db)
+):
+    """
+    Public & Patient view: List diagnostic / laboratory tests offered by a hospital.
+    """
+    return HospitalService.list_tests(
+        db=db,
+        hospital_id=hospital_id,
+        category=category,
+        available_only=available_only,
+        search_query=search
+    )
+
+
+@app.get("/api/tests/{test_id}")
+def get_test_detail(test_id: int, db: Session = Depends(get_db)):
+    test = HospitalService.get_test(db, test_id)
+    if not test:
+        raise HTTPException(status_code=404, detail="Test not found")
+    return test
+
+
+@app.post("/api/hospitals/{hospital_id}/tests", status_code=201)
+def create_hospital_test(
+    hospital_id: str,
+    payload: HospitalTestCreate,
+    x_hospital_id: Optional[str] = Header(None, alias="X-Hospital-Id"),
+    db: Session = Depends(get_db)
+):
+    """
+    Hospital-scoped: Add a new diagnostic test to this hospital's catalog.
+    """
+    req_hosp = (x_hospital_id or hospital_id).strip()
+    if payload.hospital_id and payload.hospital_id.strip().lower() != req_hosp.lower():
+        raise HTTPException(status_code=403, detail="Payload hospital_id does not match target hospital")
+    payload.hospital_id = req_hosp
+    return HospitalService.create_test(db, payload)
+
+
+@app.patch("/api/tests/{test_id}")
+@app.put("/api/tests/{test_id}")
+def update_hospital_test(
+    test_id: int,
+    payload: HospitalTestUpdate,
+    x_hospital_id: Optional[str] = Header(None, alias="X-Hospital-Id"),
+    db: Session = Depends(get_db)
+):
+    """
+    Hospital-scoped: Update test pricing, prep notes, turnaround time, or availability.
+    """
+    return HospitalService.update_test(
+        db=db,
+        test_id=test_id,
+        test_in=payload,
+        requesting_hospital_id=x_hospital_id
+    )
+
+
+@app.delete("/api/tests/{test_id}")
+def delete_hospital_test(
+    test_id: int,
+    x_hospital_id: Optional[str] = Header(None, alias="X-Hospital-Id"),
+    db: Session = Depends(get_db)
+):
+    """
+    Hospital-scoped: Remove test from catalog.
+    """
+    return HospitalService.delete_test(
+        db=db,
+        test_id=test_id,
+        requesting_hospital_id=x_hospital_id
+    )
+
+
+# --- Hospital Pharmacy Inventory ---
+
+@app.get("/api/hospitals/{hospital_id}/pharmacy")
+def list_hospital_pharmacy(
+    hospital_id: str,
+    status: Optional[str] = Query("ALL", description="Filter by stock status: ALL, LOW_STOCK, IN_STOCK"),
+    sort_by: Optional[str] = Query("name", description="Sort by: name, quantity, status, last_updated"),
+    sort_order: Optional[str] = Query("asc", description="Sort order: asc, desc"),
+    search: Optional[str] = Query(None, description="Search medicine name or generic name"),
+    db: Session = Depends(get_db)
+):
+    """
+    Public & Patient view: List hospital pharmacy inventory.
+    Status is automatically derived: LOW_STOCK when quantity <= reorder_threshold else IN_STOCK.
+    """
+    return HospitalService.list_pharmacy_items(
+        db=db,
+        hospital_id=hospital_id,
+        status_filter=status,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        search_query=search
+    )
+
+
+@app.get("/api/pharmacy/{item_id}")
+def get_pharmacy_item_detail(item_id: int, db: Session = Depends(get_db)):
+    item = HospitalService.get_pharmacy_item(db, item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Pharmacy item not found")
+    return item
+
+
+@app.post("/api/hospitals/{hospital_id}/pharmacy", status_code=201)
+def create_hospital_pharmacy_item(
+    hospital_id: str,
+    payload: HospitalPharmacyItemCreate,
+    x_hospital_id: Optional[str] = Header(None, alias="X-Hospital-Id"),
+    db: Session = Depends(get_db)
+):
+    """
+    Hospital-scoped: Add a medicine to this hospital's pharmacy inventory.
+    Automatically derives LOW_STOCK when quantity <= reorder_threshold.
+    """
+    req_hosp = (x_hospital_id or hospital_id).strip()
+    if payload.hospital_id and payload.hospital_id.strip().lower() != req_hosp.lower():
+        raise HTTPException(status_code=403, detail="Payload hospital_id does not match target hospital")
+    payload.hospital_id = req_hosp
+    return HospitalService.create_pharmacy_item(db, payload)
+
+
+@app.patch("/api/pharmacy/{item_id}")
+@app.put("/api/pharmacy/{item_id}")
+def update_hospital_pharmacy_item(
+    item_id: int,
+    payload: HospitalPharmacyItemUpdate,
+    x_hospital_id: Optional[str] = Header(None, alias="X-Hospital-Id"),
+    db: Session = Depends(get_db)
+):
+    """
+    Hospital-scoped: Update pharmacy item stock quantity, threshold, or batch info.
+    Auto-updates status to LOW_STOCK when quantity <= reorder_threshold.
+    """
+    return HospitalService.update_pharmacy_item(
+        db=db,
+        item_id=item_id,
+        item_in=payload,
+        requesting_hospital_id=x_hospital_id
+    )
+
+
+@app.delete("/api/pharmacy/{item_id}")
+def delete_hospital_pharmacy_item(
+    item_id: int,
+    x_hospital_id: Optional[str] = Header(None, alias="X-Hospital-Id"),
+    db: Session = Depends(get_db)
+):
+    """
+    Hospital-scoped: Remove medicine item from pharmacy.
+    """
+    return HospitalService.delete_pharmacy_item(
+        db=db,
+        item_id=item_id,
+        requesting_hospital_id=x_hospital_id
+    )
+
 
 
 

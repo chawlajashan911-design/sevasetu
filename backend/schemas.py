@@ -166,3 +166,124 @@ class AbhaFieldTaskCreate(BaseModel):
     district: Optional[str] = "Pune"
     reason: Optional[str] = "Patient Needs ABHA Registration Field Assistance"
 
+
+# ─────────────────────────────────────────────
+# Phase 1: Hospital Dashboard Schemas
+# ─────────────────────────────────────────────
+
+class DoctorSlot(BaseModel):
+    day: str  # "Monday", "Tuesday", etc.
+    start_time: str  # "09:00" or "09:00 AM"
+    end_time: str    # "13:00" or "01:00 PM"
+    label: Optional[str] = None
+
+class HospitalDoctorCreate(BaseModel):
+    hospital_id: str
+    hospital_name: Optional[str] = None
+    name: str
+    speciality: str
+    qualification: Optional[str] = None
+    experience_years: Optional[int] = 0
+    phone: Optional[str] = None
+    availability_slots: Optional[List[DoctorSlot]] = []
+    is_active: Optional[bool] = True
+
+class HospitalDoctorUpdate(BaseModel):
+    name: Optional[str] = None
+    speciality: Optional[str] = None
+    qualification: Optional[str] = None
+    experience_years: Optional[int] = None
+    phone: Optional[str] = None
+    availability_slots: Optional[List[DoctorSlot]] = None
+    is_active: Optional[bool] = None
+
+class HospitalDoctorResponse(BaseModel):
+    id: int
+    hospital_id: str
+    hospital_name: Optional[str] = None
+    name: str
+    speciality: str
+    qualification: Optional[str] = None
+    experience_years: Optional[int] = 0
+    phone: Optional[str] = None
+    availability_slots: List[DoctorSlot] = []
+    is_active: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class HospitalTestCreate(BaseModel):
+    hospital_id: str
+    hospital_name: Optional[str] = None
+    test_name: str
+    category: str
+    price: float
+    prep_notes: Optional[str] = None
+    turnaround_time: Optional[str] = None
+    is_available: Optional[bool] = True
+
+class HospitalTestUpdate(BaseModel):
+    test_name: Optional[str] = None
+    category: Optional[str] = None
+    price: Optional[float] = None
+    prep_notes: Optional[str] = None
+    turnaround_time: Optional[str] = None
+    is_available: Optional[bool] = None
+
+class HospitalTestResponse(BaseModel):
+    id: int
+    hospital_id: str
+    hospital_name: Optional[str] = None
+    test_name: str
+    category: str
+    price: float
+    prep_notes: Optional[str] = None
+    turnaround_time: Optional[str] = None
+    is_available: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class HospitalPharmacyItemCreate(BaseModel):
+    hospital_id: str
+    hospital_name: Optional[str] = None
+    medicine_name: str
+    generic_name: str
+    quantity: int
+    unit: Optional[str] = "strips"
+    reorder_threshold: int
+    batch_number: Optional[str] = None
+    expiry_date: Optional[str] = None
+
+class HospitalPharmacyItemUpdate(BaseModel):
+    medicine_name: Optional[str] = None
+    generic_name: Optional[str] = None
+    quantity: Optional[int] = None
+    unit: Optional[str] = None
+    reorder_threshold: Optional[int] = None
+    batch_number: Optional[str] = None
+    expiry_date: Optional[str] = None
+
+class HospitalPharmacyItemResponse(BaseModel):
+    id: int
+    hospital_id: str
+    hospital_name: Optional[str] = None
+    medicine_name: str
+    generic_name: str
+    quantity: int
+    unit: str
+    reorder_threshold: int
+    status: str
+    batch_number: Optional[str] = None
+    expiry_date: Optional[str] = None
+    last_updated: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+

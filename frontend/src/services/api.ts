@@ -603,5 +603,204 @@ export const api = {
       console.warn('Failed to fetch talukas');
     }
     return [];
+  },
+
+  // ----------------- Phase 1: Hospital Dashboard Endpoints -----------------
+
+  // Hospital Doctors
+  async getHospitalDoctors(hospitalId, filters = {}) {
+    try {
+      const params = new URLSearchParams();
+      if (filters.speciality && filters.speciality !== 'All') params.append('speciality', filters.speciality);
+      if (filters.active_only) params.append('active_only', 'true');
+      if (filters.search) params.append('search', filters.search);
+
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${API_BASE}/hospitals/${encodeURIComponent(hospitalId)}/doctors${qs}`);
+      if (!res.ok) throw new Error('Failed to fetch hospital doctors');
+      return await res.json();
+    } catch (e) {
+      console.warn('Doctors fetch error:', e);
+      return [];
+    }
+  },
+
+  async createHospitalDoctor(hospitalId, payload) {
+    const res = await fetch(`${API_BASE}/hospitals/${encodeURIComponent(hospitalId)}/doctors`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Hospital-Id': hospitalId
+      },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to create doctor');
+    }
+    return await res.json();
+  },
+
+  async updateHospitalDoctor(doctorId, payload, hospitalId = null) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (hospitalId) headers['X-Hospital-Id'] = hospitalId;
+
+    const res = await fetch(`${API_BASE}/doctors/${doctorId}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to update doctor');
+    }
+    return await res.json();
+  },
+
+  async deleteHospitalDoctor(doctorId, hospitalId = null) {
+    const headers = {};
+    if (hospitalId) headers['X-Hospital-Id'] = hospitalId;
+
+    const res = await fetch(`${API_BASE}/doctors/${doctorId}`, {
+      method: 'DELETE',
+      headers
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to delete doctor');
+    }
+    return await res.json();
+  },
+
+  // Hospital Diagnostic Tests
+  async getHospitalTests(hospitalId, filters = {}) {
+    try {
+      const params = new URLSearchParams();
+      if (filters.category && filters.category !== 'All') params.append('category', filters.category);
+      if (filters.available_only) params.append('available_only', 'true');
+      if (filters.search) params.append('search', filters.search);
+
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${API_BASE}/hospitals/${encodeURIComponent(hospitalId)}/tests${qs}`);
+      if (!res.ok) throw new Error('Failed to fetch hospital tests');
+      return await res.json();
+    } catch (e) {
+      console.warn('Tests fetch error:', e);
+      return [];
+    }
+  },
+
+  async createHospitalTest(hospitalId, payload) {
+    const res = await fetch(`${API_BASE}/hospitals/${encodeURIComponent(hospitalId)}/tests`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Hospital-Id': hospitalId
+      },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to create test');
+    }
+    return await res.json();
+  },
+
+  async updateHospitalTest(testId, payload, hospitalId = null) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (hospitalId) headers['X-Hospital-Id'] = hospitalId;
+
+    const res = await fetch(`${API_BASE}/tests/${testId}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to update test');
+    }
+    return await res.json();
+  },
+
+  async deleteHospitalTest(testId, hospitalId = null) {
+    const headers = {};
+    if (hospitalId) headers['X-Hospital-Id'] = hospitalId;
+
+    const res = await fetch(`${API_BASE}/tests/${testId}`, {
+      method: 'DELETE',
+      headers
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to delete test');
+    }
+    return await res.json();
+  },
+
+  // Hospital Pharmacy Inventory
+  async getHospitalPharmacy(hospitalId, filters = {}) {
+    try {
+      const params = new URLSearchParams();
+      if (filters.status && filters.status !== 'ALL') params.append('status', filters.status);
+      if (filters.sort_by) params.append('sort_by', filters.sort_by);
+      if (filters.sort_order) params.append('sort_order', filters.sort_order);
+      if (filters.search) params.append('search', filters.search);
+
+      const qs = params.toString() ? `?${params.toString()}` : '';
+      const res = await fetch(`${API_BASE}/hospitals/${encodeURIComponent(hospitalId)}/pharmacy${qs}`);
+      if (!res.ok) throw new Error('Failed to fetch hospital pharmacy');
+      return await res.json();
+    } catch (e) {
+      console.warn('Pharmacy fetch error:', e);
+      return { hospital_id: hospitalId, total_items: 0, low_stock_count: 0, in_stock_count: 0, items: [] };
+    }
+  },
+
+  async createHospitalPharmacyItem(hospitalId, payload) {
+    const res = await fetch(`${API_BASE}/hospitals/${encodeURIComponent(hospitalId)}/pharmacy`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Hospital-Id': hospitalId
+      },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to create pharmacy item');
+    }
+    return await res.json();
+  },
+
+  async updateHospitalPharmacyItem(itemId, payload, hospitalId = null) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (hospitalId) headers['X-Hospital-Id'] = hospitalId;
+
+    const res = await fetch(`${API_BASE}/pharmacy/${itemId}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to update pharmacy item');
+    }
+    return await res.json();
+  },
+
+  async deleteHospitalPharmacyItem(itemId, hospitalId = null) {
+    const headers = {};
+    if (hospitalId) headers['X-Hospital-Id'] = hospitalId;
+
+    const res = await fetch(`${API_BASE}/pharmacy/${itemId}`, {
+      method: 'DELETE',
+      headers
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to delete pharmacy item');
+    }
+    return await res.json();
   }
 };
+

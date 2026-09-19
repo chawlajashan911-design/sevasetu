@@ -233,3 +233,71 @@ class AbhaFieldTask(Base):
     status = Column(String(50), default="Pending Assistance")
     created_at = Column(DateTime, default=datetime.utcnow)
 
+
+# ─────────────────────────────────────────────
+# Phase 1: Hospital Dashboard Models
+# ─────────────────────────────────────────────
+
+class HospitalDoctor(Base):
+    """
+    Hospital-scoped doctor profile with multi-slot availability schedules and active flag.
+    Editable only by the hospital; readable by patients.
+    """
+    __tablename__ = "hospital_doctors"
+
+    id = Column(Integer, primary_key=True, index=True)
+    hospital_id = Column(String(100), nullable=False, index=True)
+    hospital_name = Column(String(255), nullable=True)
+    name = Column(String(150), nullable=False)
+    speciality = Column(String(100), nullable=False)
+    qualification = Column(String(100), nullable=True)
+    experience_years = Column(Integer, nullable=True, default=0)
+    phone = Column(String(50), nullable=True)
+    # JSON-encoded array of slot dicts: [{"day": "Monday", "start_time": "09:00", "end_time": "13:00"}]
+    availability_slots = Column(Text, nullable=True, default="[]")
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class HospitalTest(Base):
+    """
+    Hospital-scoped diagnostic / laboratory test catalog with prep notes and availability.
+    Editable only by the hospital; readable by patients.
+    """
+    __tablename__ = "hospital_tests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    hospital_id = Column(String(100), nullable=False, index=True)
+    hospital_name = Column(String(255), nullable=True)
+    test_name = Column(String(150), nullable=False)
+    category = Column(String(100), nullable=False)  # Pathology, Radiology, Cardiology, etc.
+    price = Column(Float, nullable=False, default=0.0)
+    prep_notes = Column(Text, nullable=True)
+    turnaround_time = Column(String(100), nullable=True)  # e.g., "2 hours", "Same day"
+    is_available = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class HospitalPharmacyItem(Base):
+    """
+    Hospital pharmacy inventory item with auto-derived LOW_STOCK status.
+    Status rule: LOW_STOCK when quantity <= reorder_threshold else IN_STOCK.
+    Editable only by the hospital; readable by patients.
+    """
+    __tablename__ = "hospital_pharmacy_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    hospital_id = Column(String(100), nullable=False, index=True)
+    hospital_name = Column(String(255), nullable=True)
+    medicine_name = Column(String(150), nullable=False)
+    generic_name = Column(String(150), nullable=False)
+    quantity = Column(Integer, nullable=False, default=0)
+    unit = Column(String(50), nullable=False, default="strips")
+    reorder_threshold = Column(Integer, nullable=False, default=10)
+    status = Column(String(20), nullable=False, default="IN_STOCK")  # "LOW_STOCK" or "IN_STOCK"
+    batch_number = Column(String(100), nullable=True)
+    expiry_date = Column(String(50), nullable=True)
+    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+

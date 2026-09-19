@@ -36,7 +36,9 @@ import {
   HelpCircle,
   Search,
   Plus,
-  Minus
+  Minus,
+  FlaskConical,
+  X
 } from 'lucide-react';
 
 export const PatientPortal = ({
@@ -192,6 +194,38 @@ export const PatientPortal = ({
   const [apptTimeSlot, setApptTimeSlot] = useState('10:00 AM - 10:30 AM');
   const [apptReason, setApptReason] = useState('Routine OPD Consultation & Checkup');
   const [bookingSuccessMsg, setBookingSuccessMsg] = useState(null);
+
+  // Hospital Public Profile & Services Modal (Phase 1)
+  const [selectedHospitalForServices, setSelectedHospitalForServices] = useState(null);
+  const [hospitalServicesModalOpen, setHospitalServicesModalOpen] = useState(false);
+  const [hospitalDoctors, setHospitalDoctors] = useState([]);
+  const [hospitalTests, setHospitalTests] = useState([]);
+  const [hospitalPharmacy, setHospitalPharmacy] = useState({ total_items: 0, low_stock_count: 0, in_stock_count: 0, items: [] });
+  const [loadingHospitalServices, setLoadingHospitalServices] = useState(false);
+  const [activeHospitalServiceTab, setActiveHospitalServiceTab] = useState('doctors');
+
+  const handleOpenHospitalServices = async (fac) => {
+    setSelectedHospitalForServices(fac);
+    setHospitalServicesModalOpen(true);
+    setLoadingHospitalServices(true);
+    setActiveHospitalServiceTab('doctors');
+    const targetId = fac.id || 'hospital_aundh';
+    try {
+      const [docsRes, testsRes, pharmRes] = await Promise.allSettled([
+        api.getHospitalDoctors(targetId, { active_only: true }),
+        api.getHospitalTests(targetId, { available_only: true }),
+        api.getHospitalPharmacy(targetId)
+      ]);
+      setHospitalDoctors(docsRes.status === 'fulfilled' ? docsRes.value || [] : []);
+      setHospitalTests(testsRes.status === 'fulfilled' ? testsRes.value || [] : []);
+      setHospitalPharmacy(pharmRes.status === 'fulfilled' ? pharmRes.value || { items: [] } : { items: [] });
+    } catch (e) {
+      console.error('Error loading hospital services:', e);
+    } finally {
+      setLoadingHospitalServices(false);
+    }
+  };
+
 
   // Load facilities from Government Hospital Directory (PostgreSQL)
   const refreshPatientData = async () => {
@@ -1326,32 +1360,44 @@ export const PatientPortal = ({
                       </div>
 
                       {/* Card Action Buttons */}
-                      <div className="grid grid-cols-2 gap-2 pt-3 border-t border-slate-200">
+                      <div className="space-y-2 pt-3 border-t border-slate-200">
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedFacilityForAppt(fac.name);
+                              setActiveTab('book_appointment');
+                            }}
+                            className="flex items-center justify-center space-x-1.5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+                          >
+                            <Calendar className="w-3.5 h-3.5" />
+                            <span>Book OPD</span>
+                          </button>
+                          {fac.phone ? (
+                            <a
+                              href={`tel:${fac.phone}`}
+                              className="flex items-center justify-center space-x-1.5 py-2.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold transition-colors"
+                            >
+                              <Phone className="w-3.5 h-3.5 text-teal-600" />
+                              <span className="truncate">{fac.phone}</span>
+                            </a>
+                          ) : (
+                            <div className="flex items-center justify-center space-x-1.5 py-2.5 bg-slate-100 text-slate-500 border border-slate-200 rounded-xl text-xs font-semibold">
+                              <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                              <span>In-person Walk-in</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Phase 1: Public Services, Doctors & Pharmacy Catalog */}
                         <button
                           type="button"
-                          onClick={() => {
-                            setSelectedFacilityForAppt(fac.name);
-                            setActiveTab('book_appointment');
-                          }}
-                          className="flex items-center justify-center space-x-1.5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer"
+                          onClick={() => handleOpenHospitalServices(fac)}
+                          className="w-full flex items-center justify-center space-x-1.5 py-2 bg-slate-100 hover:bg-teal-50 hover:text-teal-800 hover:border-teal-300 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
                         >
-                          <Calendar className="w-3.5 h-3.5" />
-                          <span>Book OPD</span>
+                          <Stethoscope className="w-3.5 h-3.5 text-teal-600" />
+                          <span>View Specialist Doctors, Tests & Rates</span>
                         </button>
-                        {fac.phone ? (
-                          <a
-                            href={`tel:${fac.phone}`}
-                            className="flex items-center justify-center space-x-1.5 py-2.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold transition-colors"
-                          >
-                            <Phone className="w-3.5 h-3.5 text-teal-600" />
-                            <span className="truncate">{fac.phone}</span>
-                          </a>
-                        ) : (
-                          <div className="flex items-center justify-center space-x-1.5 py-2.5 bg-slate-100 text-slate-500 border border-slate-200 rounded-xl text-xs font-semibold">
-                            <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                            <span>In-person Walk-in</span>
-                          </div>
-                        )}
                       </div>
                     </div>
                   );
@@ -1776,6 +1822,194 @@ export const PatientPortal = ({
               Update Profile Details
             </button>
           </form>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* PHASE 1: HOSPITAL PUBLIC SERVICES & DOCTORS MODAL FOR CITIZENS / PATIENTS */}
+      {/* ========================================================================= */}
+      {hospitalServicesModalOpen && selectedHospitalForServices && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-3xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 animate-fadeIn my-8 max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between border-b border-slate-100 pb-4 shrink-0">
+              <div className="flex items-center space-x-3">
+                <div className="w-12 h-12 rounded-2xl bg-teal-600 text-white flex items-center justify-center font-bold text-xl shadow-md shrink-0">
+                  🏥
+                </div>
+                <div>
+                  <span className="bg-teal-100 text-teal-900 text-[10px] font-black uppercase px-2 py-0.5 rounded-full">
+                    {selectedHospitalForServices.care_type || 'PUBLIC HEALTHCARE FACILITY'}
+                  </span>
+                  <h3 className="text-lg sm:text-xl font-black text-slate-900 mt-0.5">
+                    {selectedHospitalForServices.name}
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium flex items-center space-x-1">
+                    <MapPin className="w-3 h-3 text-teal-600 shrink-0" />
+                    <span>{selectedHospitalForServices.address || selectedHospitalForServices.district || 'Maharashtra'}</span>
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setHospitalServicesModalOpen(false)}
+                className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-700 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Sub-Tabs */}
+            <div className="flex items-center space-x-2 border-b border-slate-200 py-3 shrink-0">
+              {[
+                { id: 'doctors', label: `Specialist Doctors (${hospitalDoctors.length})`, icon: Stethoscope },
+                { id: 'tests', label: `Diagnostic Tests & Rates (${hospitalTests.length})`, icon: FlaskConical },
+                { id: 'pharmacy', label: `Pharmacy Stock (${hospitalPharmacy.items?.length || 0})`, icon: Pill }
+              ].map(tab => {
+                const Icon = tab.icon;
+                const isActive = activeHospitalServiceTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveHospitalServiceTab(tab.id)}
+                    className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-teal-600 text-white shadow-sm'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Modal Body Content (Scrollable) */}
+            <div className="flex-1 overflow-y-auto py-4 space-y-4 pr-1">
+              {loadingHospitalServices ? (
+                <div className="p-12 text-center text-slate-500">
+                  <div className="w-8 h-8 border-4 border-teal-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                  <p className="text-xs font-bold">Loading official facility records...</p>
+                </div>
+              ) : (
+                <>
+                  {/* DOCTORS TAB */}
+                  {activeHospitalServiceTab === 'doctors' && (
+                    <div className="space-y-3">
+                      {hospitalDoctors.length > 0 ? (
+                        hospitalDoctors.map(doc => (
+                          <div key={doc.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <span className="bg-teal-100 text-teal-900 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
+                                  {doc.speciality}
+                                </span>
+                                <h4 className="text-sm font-black text-slate-900 mt-1">{doc.name}</h4>
+                                <p className="text-xs text-slate-500">{doc.qualification} {doc.experience_years > 0 ? `• ${doc.experience_years} yrs exp` : ''}</p>
+                              </div>
+                              <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                                Available for Consultation
+                              </span>
+                            </div>
+
+                            {/* Slots */}
+                            {doc.availability_slots && doc.availability_slots.length > 0 && (
+                              <div className="bg-white p-2.5 rounded-xl border border-slate-200 space-y-1">
+                                <p className="text-[10px] font-black uppercase text-slate-400">OPD Timetable:</p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                  {doc.availability_slots.map((s, i) => (
+                                    <div key={i} className="text-[11px] text-slate-700 flex items-center justify-between bg-slate-50 px-2 py-1 rounded-lg">
+                                      <span className="font-bold">{s.day}</span>
+                                      <span className="font-mono text-teal-800">{s.start_time} - {s.end_time}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      ) : (
+                        <div className="p-8 text-center text-slate-500 text-xs bg-slate-50 rounded-2xl">
+                          No doctor schedules currently published for this facility.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TESTS TAB */}
+                  {activeHospitalServiceTab === 'tests' && (
+                    <div className="space-y-3">
+                      {hospitalTests.length > 0 ? (
+                        hospitalTests.map(t => (
+                          <div key={t.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="space-y-1 flex-1">
+                              <span className="bg-purple-100 text-purple-900 text-[10px] font-black px-2 py-0.5 rounded-full uppercase">
+                                {t.category}
+                              </span>
+                              <h4 className="text-sm font-black text-slate-900">{t.test_name}</h4>
+                              {t.prep_notes && (
+                                <p className="text-[11px] text-slate-600 bg-white p-2 rounded-lg border border-slate-100">
+                                  📋 <strong>Prep:</strong> {t.prep_notes}
+                                </p>
+                              )}
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-base font-black text-teal-900">₹{t.price.toFixed(2)}</p>
+                              <p className="text-[10px] text-slate-500 font-semibold">⏱️ {t.turnaround_time || 'Same day'}</p>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="p-8 text-center text-slate-500 text-xs bg-slate-50 rounded-2xl">
+                          No diagnostic tests catalog currently published for this facility.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* PHARMACY TAB */}
+                  {activeHospitalServiceTab === 'pharmacy' && (
+                    <div className="space-y-3">
+                      {hospitalPharmacy.items && hospitalPharmacy.items.length > 0 ? (
+                        hospitalPharmacy.items.map(p => (
+                          <div key={p.id} className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+                            <div>
+                              <h4 className="text-xs font-black text-slate-900">{p.medicine_name}</h4>
+                              <p className="text-[11px] text-slate-500">{p.generic_name}</p>
+                            </div>
+                            <span className={`text-[10px] font-black px-2.5 py-1 rounded-xl ${
+                              p.status === 'LOW_STOCK'
+                                ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                            }`}>
+                              {p.status === 'LOW_STOCK' ? 'Limited Availability' : 'In Stock'}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="p-8 text-center text-slate-500 text-xs bg-slate-50 rounded-2xl">
+                          No pharmacy inventory list currently published for this facility.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between shrink-0">
+              <span className="text-[11px] text-slate-500">Government Healthcare Transparency Network</span>
+              <button
+                type="button"
+                onClick={() => setHospitalServicesModalOpen(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Close Window
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -8,7 +8,11 @@ for any user/phone entered.
 import json
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from .models import Patient, TriageRecord, Inventory, Referral, Appointment, OutbreakCluster, AshaIncentive, OtpSession
+from .models import (
+    Patient, TriageRecord, Inventory, Referral, Appointment,
+    OutbreakCluster, AshaIncentive, OtpSession,
+    HospitalDoctor, HospitalTest, HospitalPharmacyItem
+)
 
 FACILITIES = []
 
@@ -47,7 +51,11 @@ def seed_database(db: Session):
 
 def reset_dynamic_data(db: Session):
     """Clear user-generated records while retaining reference datasets."""
-    for model in (OtpSession, AshaIncentive, OutbreakCluster, Appointment, Referral, TriageRecord, Patient, Inventory):
+    for model in (
+        OtpSession, AshaIncentive, OutbreakCluster, Appointment,
+        Referral, TriageRecord, Patient, Inventory,
+        HospitalDoctor, HospitalTest, HospitalPharmacyItem
+    ):
         db.query(model).delete()
     db.commit()
     seed_database(db)
@@ -164,4 +172,262 @@ def seed_demo_data(db: Session):
         AshaIncentive(asha_id="ASHA_01", asha_name="Surekha Tai", activity_type="Monthly Screening", patient_name="Sunita Patil", amount=250, status="Approved"),
         AshaIncentive(asha_id="ASHA_01", asha_name="Surekha Tai", activity_type="Referral Escort", patient_name="Ananda Shinde", amount=350, status="Pending"),
     ])
+
+    # Phase 1: Hospital Doctors (multi-slot availability)
+    hospital_ids = ["hospital_aundh", "hosp-1"]
+    for hid in hospital_ids:
+        hname = "Aundh District Hospital" if hid == "hospital_aundh" else "District Hospital"
+        db.add_all([
+            HospitalDoctor(
+                hospital_id=hid,
+                hospital_name=hname,
+                name="Dr. Arvind Kulkarni",
+                speciality="Cardiology",
+                qualification="MBBS, MD, DM (Cardiology)",
+                experience_years=14,
+                phone="9822101001",
+                availability_slots=json.dumps([
+                    {"day": "Monday", "start_time": "09:00", "end_time": "13:00", "label": "Morning OPD"},
+                    {"day": "Wednesday", "start_time": "09:00", "end_time": "13:00", "label": "Morning OPD"},
+                    {"day": "Friday", "start_time": "14:00", "end_time": "18:00", "label": "Evening Clinic"}
+                ]),
+                is_active=True
+            ),
+            HospitalDoctor(
+                hospital_id=hid,
+                hospital_name=hname,
+                name="Dr. Shalini Deshmukh",
+                speciality="Obstetrics & Gynecology",
+                qualification="MBBS, MS (OBGY), DGO",
+                experience_years=11,
+                phone="9822101002",
+                availability_slots=json.dumps([
+                    {"day": "Tuesday", "start_time": "10:00", "end_time": "14:00", "label": "High-Risk Maternal OPD"},
+                    {"day": "Thursday", "start_time": "10:00", "end_time": "14:00", "label": "Antenatal Clinic"},
+                    {"day": "Saturday", "start_time": "09:00", "end_time": "12:00", "label": "General Consultation"}
+                ]),
+                is_active=True
+            ),
+            HospitalDoctor(
+                hospital_id=hid,
+                hospital_name=hname,
+                name="Dr. Rajesh Shinde",
+                speciality="General Medicine",
+                qualification="MBBS, MD (Internal Medicine)",
+                experience_years=16,
+                phone="9822101003",
+                availability_slots=json.dumps([
+                    {"day": "Monday", "start_time": "08:30", "end_time": "13:30", "label": "Morning OPD"},
+                    {"day": "Tuesday", "start_time": "08:30", "end_time": "13:30", "label": "Morning OPD"},
+                    {"day": "Wednesday", "start_time": "08:30", "end_time": "13:30", "label": "Morning OPD"},
+                    {"day": "Thursday", "start_time": "08:30", "end_time": "13:30", "label": "Morning OPD"},
+                    {"day": "Friday", "start_time": "08:30", "end_time": "13:30", "label": "Morning OPD"}
+                ]),
+                is_active=True
+            ),
+            HospitalDoctor(
+                hospital_id=hid,
+                hospital_name=hname,
+                name="Dr. Priya Nair",
+                speciality="Pediatrics",
+                qualification="MBBS, DCH, MD (Pediatrics)",
+                experience_years=9,
+                phone="9822101004",
+                availability_slots=json.dumps([
+                    {"day": "Monday", "start_time": "10:00", "end_time": "14:00", "label": "Child Wellness Clinic"},
+                    {"day": "Wednesday", "start_time": "10:00", "end_time": "14:00", "label": "Immunization & Pediatric OPD"},
+                    {"day": "Friday", "start_time": "10:00", "end_time": "14:00", "label": "Pediatric OPD"}
+                ]),
+                is_active=True
+            ),
+            HospitalDoctor(
+                hospital_id=hid,
+                hospital_name=hname,
+                name="Dr. Vikrant Patil",
+                speciality="Orthopedics",
+                qualification="MBBS, MS (Orthopedics)",
+                experience_years=12,
+                phone="9822101005",
+                availability_slots=json.dumps([
+                    {"day": "Tuesday", "start_time": "14:00", "end_time": "17:00", "label": "Fracture & Joint Clinic"},
+                    {"day": "Friday", "start_time": "14:00", "end_time": "17:00", "label": "Ortho OPD"}
+                ]),
+                is_active=False  # On administrative leave / inactive
+            )
+        ])
+
+        # Phase 1: Hospital Diagnostic Tests
+        db.add_all([
+            HospitalTest(
+                hospital_id=hid,
+                hospital_name=hname,
+                test_name="Complete Blood Count (CBC) with Platelets",
+                category="Pathology",
+                price=250.0,
+                prep_notes="No fasting required. Venous blood sample drawn.",
+                turnaround_time="2 hours",
+                is_available=True
+            ),
+            HospitalTest(
+                hospital_id=hid,
+                hospital_name=hname,
+                test_name="Fasting Blood Sugar (FBS)",
+                category="Pathology",
+                price=120.0,
+                prep_notes="Requires 10-12 hours strict overnight fasting. Water permitted.",
+                turnaround_time="3 hours",
+                is_available=True
+            ),
+            HospitalTest(
+                hospital_id=hid,
+                hospital_name=hname,
+                test_name="Digital Chest X-Ray (PA View)",
+                category="Radiology",
+                price=400.0,
+                prep_notes="Remove metallic ornaments, necklaces, and metal-buttoned garments before scan.",
+                turnaround_time="1 hour",
+                is_available=True
+            ),
+            HospitalTest(
+                hospital_id=hid,
+                hospital_name=hname,
+                test_name="12-Lead Standard Electrocardiogram (ECG)",
+                category="Cardiology",
+                price=350.0,
+                prep_notes="Rest in supine position for 10 minutes prior to electrode placement.",
+                turnaround_time="30 mins",
+                is_available=True
+            ),
+            HospitalTest(
+                hospital_id=hid,
+                hospital_name=hname,
+                test_name="Ultrasound Abdomen & Pelvis (USG)",
+                category="Radiology",
+                price=1200.0,
+                prep_notes="Drink 1 litre of water 1 hour before test. Do not void urine — full bladder required.",
+                turnaround_time="4 hours",
+                is_available=True
+            ),
+            HospitalTest(
+                hospital_id=hid,
+                hospital_name=hname,
+                test_name="Lipid Profile (Cholesterol, HDL, LDL, Triglycerides)",
+                category="Biochemistry",
+                price=650.0,
+                prep_notes="12-14 hours strict overnight fasting required. Avoid fatty meal on previous evening.",
+                turnaround_time="4 hours",
+                is_available=True
+            ),
+            HospitalTest(
+                hospital_id=hid,
+                hospital_name=hname,
+                test_name="Serum Creatinine & Blood Urea Nitrogen",
+                category="Biochemistry",
+                price=300.0,
+                prep_notes="Routine blood sample. Stay adequately hydrated.",
+                turnaround_time="2 hours",
+                is_available=False  # Machine undergoing calibration
+            )
+        ])
+
+        # Phase 1: Hospital Pharmacy Inventory (Auto-derived LOW_STOCK when quantity <= reorder_threshold)
+        db.add_all([
+            HospitalPharmacyItem(
+                hospital_id=hid,
+                hospital_name=hname,
+                medicine_name="Tab Paracetamol 650mg",
+                generic_name="Acetaminophen 650mg",
+                quantity=1500,
+                unit="strips",
+                reorder_threshold=300,
+                status="IN_STOCK",
+                batch_number="PCM-2026-A1",
+                expiry_date="2027-12"
+            ),
+            HospitalPharmacyItem(
+                hospital_id=hid,
+                hospital_name=hname,
+                medicine_name="Tab Amlodipine 5mg",
+                generic_name="Amlodipine Besylate",
+                quantity=45,
+                unit="strips",
+                reorder_threshold=100,
+                status="LOW_STOCK",  # 45 <= 100
+                batch_number="AML-2025-C3",
+                expiry_date="2027-06"
+            ),
+            HospitalPharmacyItem(
+                hospital_id=hid,
+                hospital_name=hname,
+                medicine_name="Cap Amoxicillin 500mg",
+                generic_name="Amoxicillin Trihydrate",
+                quantity=600,
+                unit="strips",
+                reorder_threshold=150,
+                status="IN_STOCK",
+                batch_number="AMX-2026-F9",
+                expiry_date="2028-01"
+            ),
+            HospitalPharmacyItem(
+                hospital_id=hid,
+                hospital_name=hname,
+                medicine_name="Inj Ceftriaxone 1g",
+                generic_name="Ceftriaxone Sodium Sterile Powder",
+                quantity=20,
+                unit="vials",
+                reorder_threshold=20,
+                status="LOW_STOCK",  # 20 <= 20 (exact edge case)
+                batch_number="CFT-2025-E2",
+                expiry_date="2026-11"
+            ),
+            HospitalPharmacyItem(
+                hospital_id=hid,
+                hospital_name=hname,
+                medicine_name="Tab Metformin 500mg",
+                generic_name="Metformin Hydrochloride IP",
+                quantity=850,
+                unit="strips",
+                reorder_threshold=200,
+                status="IN_STOCK",
+                batch_number="MET-2026-K4",
+                expiry_date="2027-09"
+            ),
+            HospitalPharmacyItem(
+                hospital_id=hid,
+                hospital_name=hname,
+                medicine_name="Tab Azithromycin 500mg",
+                generic_name="Azithromycin Dihydrate",
+                quantity=12,
+                unit="strips",
+                reorder_threshold=50,
+                status="LOW_STOCK",  # 12 <= 50
+                batch_number="AZM-2025-M7",
+                expiry_date="2027-03"
+            ),
+            HospitalPharmacyItem(
+                hospital_id=hid,
+                hospital_name=hname,
+                medicine_name="ORS Electrolyte Sachet 21.8g",
+                generic_name="WHO Formula Oral Rehydration Salts",
+                quantity=1200,
+                unit="packets",
+                reorder_threshold=250,
+                status="IN_STOCK",
+                batch_number="ORS-2026-R1",
+                expiry_date="2028-06"
+            ),
+            HospitalPharmacyItem(
+                hospital_id=hid,
+                hospital_name=hname,
+                medicine_name="Tab Salbutamol 4mg",
+                generic_name="Salbutamol Sulfate",
+                quantity=8,
+                unit="strips",
+                reorder_threshold=40,
+                status="LOW_STOCK",  # 8 <= 40
+                batch_number="SLB-2025-B4",
+                expiry_date="2027-04"
+            )
+        ])
+
     db.commit()
